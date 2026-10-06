@@ -1,4 +1,26 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Canopy — Carbon Asset Workspace</title><meta name="description" content="Demo SME and admin workspaces for carbon trading requests, holdings and retirement."><link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231b513d'/%3E%3Cpath d='M8 22L16 7l8 15h-6v4h-4v-4z' fill='%23d9f279'/%3E%3C/svg%3E"><link rel="stylesheet" href="style.css"><script src="model.js" defer></script><script src="app.js" defer></script></head><body>
-<aside class="sidebar"><a class="brand" href="#market"><span class="mark">c</span>canopy<span class="brand-dot">.</span></a><div class="workspace"><span class="avatar" id="avatar">M</span><div id="workspaceName"></div></div><p class="nav-label" id="navLabel">SME WORKSPACE</p><nav id="navigation" aria-label="Main navigation"></nav><div class="sidebar-note"><span class="small-label">PLANNED EXECUTION ROUTE</span><h3>BCX-linked, admin managed.</h3><p>A BCX connection and partner arrangement are not yet active.</p><span class="status pending">Integration pending</span></div><div class="sidebar-foot">Canopy for business <span>v0.2 demo</span></div></aside>
-<div class="app"><header><div class="breadcrumb">Workspace <span>/</span><strong id="crumb"></strong></div><div class="header-right"><label class="switch-label">Demo account<select id="accountSwitch" aria-label="Demo account"></select></label></div></header><main><div class="notice"><span class="notice-icon">i</span><span><strong>Workflow demonstration.</strong> Fictional credits, companies and execution records. Account switching is for testing, not secure sign-in. Data stays in this browser; use sample documents only.</span></div><div id="storageWarning" class="warning" hidden></div><div id="content"></div><footer><span>© 2026 Canopy · SME carbon asset workspace</span><span id="saveStatus">Local demo · No live payments or BCX connection</span></footer></main></div>
-<dialog id="projectDialog" aria-labelledby="dialogTitle"><div class="dialog-top"><span class="eyebrow">CANOPY · DEMO WORKFLOW</span><button class="close" aria-label="Close dialog">×</button></div><div id="dialogBody"></div></dialog><div id="toast" role="status" aria-live="polite"></div></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Canopy — Malaysian Carbon Asset &amp; ESG Platform</title>
+  <meta name="description" content="Malaysia's B2B fractional carbon asset and ESG compliance platform for SMEs, Partners, and Developers.">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23184e3a'/%3E%3Cpath d='M8 22L16 7l8 15h-6v4h-4v-4z' fill='%23d8ee8c'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <script src="model.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <dialog id="projectDialog" aria-labelledby="dialogTitle">
+    <div class="dialog-top">
+      <span class="eyebrow" id="dialogEyebrow">CANOPY · WORKSPACE ACTION</span>
+      <button class="close" id="dialogCloseBtn" aria-label="Close dialog">×</button>
+    </div>
+    <div id="dialogBody"></div>
+  </dialog>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

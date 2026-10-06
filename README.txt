@@ -1,16 +1,54 @@
-CANOPY - SME CARBON MARKETPLACE DEMO
+CANOPY CARBON PLATFORM - SME CARBON MARKETPLACE
+VERSION 0.3 - LOGIN, MULTI-ROLE PLATFORM & 5-STREAM REVENUE MODEL
 
 Open index.html in a modern browser. No installation is needed.
-VERSION 0.2 - ADMIN AND SME WORKFLOWS
-Use the Demo account selector to switch between Admin and sample SME companies.
-SMEs: browse listings and documents; request fractional purchases, sales, transfers and retirement; view holdings, requests, transactions and sample retirement records; submit company profiles and sample verification documents.
-Admins: add/edit/publish/pause projects, set sample prices and inventory, upload documents, verify/suspend companies, approve/reject/complete requests, match demo sale buyers, export CSV reports and inspect the audit log.
 
-Try it: Meranti Manufacturing -> My holdings -> Sell/Transfer/Retire -> submit.
-Switch to Admin -> Request queue -> Review -> Approve with a note -> Complete demo with a unique execution reference.
-Switch back to the SME to see holdings and history. Retirement also creates a sample record.
+LOGIN & ROLES
+The platform now starts with a login page. Choose a role:
+  SME Business  - Browse and trade carbon credits, manage portfolio
+  Canopy Admin  - Oversee marketplace, approve requests, billing
+  Partner Portal - Refer SMEs, track client activity, earn commissions
+Use the Quick Login buttons for instant demo access.
 
-Browser-local data persists when storage is available. Use one tab at a time. Different browsers/devices do not share data. The standalone file and HTTP preview may have separate local storage. Do not enter personal or confidential information. Upload sample PDF/PNG/JPG/TXT files only, under 500 KB each.
-All projects, prices, companies, holdings, trades and records are fictional. This is not secure authentication or production custody/accounting. No real payment, BCX connection, registry transaction or legally verified company check occurs. BCX is a planned execution route, not a confirmed partnership. Sample records must not support environmental claims.
-Live operation still requires server-side authentication and authorization, a shared transactional database, secure document storage, partner/BCX execution arrangements, payment settlement and authoritative registry evidence.
-Source files: index.html, style.css, model.js, app.js. Google Fonts are optional; fallback fonts work offline.
+REVENUE STREAMS
+1. SME Transaction Fee (1.5%)
+   Buy: Credit value + 1.5% platform fee = Total payable
+   Sell: Gross value - 1.5% fee = Net proceeds to SME
+
+2. Premium Subscription (RM150/month)
+   Free plan: Basic browsing and tracking
+   Premium: Advanced analytics, BCX benchmarks, 48h early access to new projects
+
+3. Carbon & ESG Reports (RM100)
+   Free snapshot or comprehensive paid report with holdings, transactions,
+   retired credits, sustainability summary and verification QR code
+
+4. Project Developer Commission (1%)
+   Platform earns 1% commission on developer credit sales
+   Admin dashboard tracks per-developer billing and settlement
+
+5. Partner Portal (RM500/month)
+   Partners refer SMEs, earn 20% of platform fees on client trades
+   Full dashboard with referral management, client ESG data, reporting tools
+
+ADMIN FEATURES
+Dashboard, project management, request queue, company verification,
+developer billing, revenue analytics (5-stream breakdown with ledger)
+
+SME FEATURES
+Carbon credit marketplace, portfolio with analytics, buy/sell/retire,
+premium subscription, ESG report generation, transaction history
+
+PARTNER FEATURES
+Dashboard overview, SME referral management, client ESG data,
+reporting tools, carbon project information, partner analytics
+
+DISCLAIMER
+Browser-local data persists when storage is available. Use one tab at a time.
+All projects, prices, companies, holdings, trades and records are fictional.
+This is not secure authentication or production custody/accounting.
+No real payment, BCX connection, registry transaction or legally verified
+company check occurs. Sample records must not support environmental claims.
+
+Source files: index.html, style.css, model.js, app.js
+Google Fonts are optional; fallback fonts work offline.
