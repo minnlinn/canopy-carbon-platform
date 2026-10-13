@@ -52,3 +52,19 @@ company check occurs. Sample records must not support environmental claims.
 
 Source files: index.html, style.css, model.js, app.js
 Google Fonts are optional; fallback fonts work offline.
+
+PROGRESSIVE WEB APP
+Deploy the site files at the domain root over HTTPS. On Android, open the site
+in Chrome and use its Install app option to add Canopy to the app launcher.
+The manifest requests standalone display, which hides browser navigation when
+the installed app is launched. Service workers require HTTPS; localhost is also
+supported for development.
+
+The service worker caches only the local public app shell and icons, uses the
+network first while online, and falls back to cached pages/assets offline. It
+does not cache configuration, authentication responses, or API data. When a
+new service-worker version is deployed, Canopy offers an Update button. The QR
+page remains available, but its generated QR image requires an internet
+connection because it is supplied by an external QR image service.
+For each release, update the cache version in sw.js so browsers detect the new
+worker and refresh the offline app shell.
