@@ -48,7 +48,7 @@ function bindAuth(){
   $('#loginForm').addEventListener('submit', async event=>{
     event.preventDefault(); const form=new FormData(event.currentTarget); $('#authFeedback').textContent='Signing in…';
     const {error}=await db.auth.signInWithPassword({email:form.get('email'),password:form.get('password')});
-    if(error){ $('#authFeedback').textContent=error.message; return; } await enterApp();
+    if(error){ $('#authFeedback').textContent=error.message==='Failed to fetch' ? 'Cannot reach the configured Supabase Auth server. Check the Supabase project URL and network connection, then retry.' : error.message; return; } await enterApp();
   });
   $('#registerForm').addEventListener('submit', async event=>{
     event.preventDefault(); const form=new FormData(event.currentTarget); $('#authFeedback').textContent='Creating your account…';

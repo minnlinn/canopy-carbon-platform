@@ -68,3 +68,26 @@ page remains available, but its generated QR image requires an internet
 connection because it is supplied by an external QR image service.
 For each release, update the cache version in sw.js so browsers detect the new
 worker and refresh the offline app shell.
+
+PASSWORD RECOVERY AND SUPABASE AUTH
+The recovery email redirects to:
+   https://canopy-carbon-platform.vercel.app/reset-password.html
+
+In Supabase Dashboard > Authentication > URL Configuration, set Site URL to:
+   https://canopy-carbon-platform.vercel.app
+
+Add this exact Redirect URL to the allowed redirect URLs:
+   https://canopy-carbon-platform.vercel.app/reset-password.html
+
+Ensure the password recovery email template links through Supabase's
+{{ .ConfirmationURL }} so the requested redirect URL is honored.
+
+For local testing on port 8765, also allow:
+   http://localhost:8765/reset-password.html
+
+The Supabase project URL currently in config.js returns NXDOMAIN. Replace both
+supabaseUrl and supabaseAnonKey with the Project URL and publishable key from
+the same active project in Supabase Dashboard > Project Settings > API, then
+update the deployed config.js in Vercel. Password reset emails also require
+email delivery to be enabled; configure custom SMTP for production delivery
+if the default Supabase mail service is insufficient.
