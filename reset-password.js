@@ -90,13 +90,14 @@
 
   document.querySelector('#resetRequestForm').addEventListener('submit', async event => {
     event.preventDefault();
+    const formElement = event.currentTarget;
     requestButton.disabled = true;
     showMessage('Sending reset instructions…', 'success');
     try {
-      const email = new FormData(event.currentTarget).get('email').trim();
+      const email = new FormData(formElement).get('email').trim();
       const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: requestedRedirect });
       if (error) throw error;
-      event.currentTarget.reset();
+      formElement.reset();
       showMessage('If an account exists for that email, password-reset instructions have been sent.', 'success');
     } catch (error) {
       const detail = error.message === 'Failed to fetch'
