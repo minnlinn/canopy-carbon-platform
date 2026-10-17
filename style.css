@@ -137,3 +137,5 @@ body{font-size:16px}.sidebar{overflow-y:auto}.workspace{margin:24px 0 17px}.work
   align-items: center;
   justify-content: center;
 }
+
+.feedback-message{min-height:18px;margin:10px 0 0;font-size:13px;font-weight:600}.feedback-success{color:#20663a}.feedback-error{color:#a02c2c}
