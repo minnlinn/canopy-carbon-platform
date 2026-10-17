@@ -94,3 +94,28 @@ body{font-size:16px}.sidebar{overflow-y:auto}.workspace{margin:24px 0 17px}.work
 .canopy-live .table-wrap td button + button {
   margin-left: 8px;
 }
+
+/* Approved and Suspended account indicators */
+.canopy-live .account-action-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 100px;
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 7px;
+  font-size: 14px;
+  font-weight: 700;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+
+.canopy-live .approved-label {
+  background: #e1f3e5;
+  color: #20663a;
+}
+
+.canopy-live .suspended-label {
+  background: #fde5e1;
+  color: #a23b32;
+}
