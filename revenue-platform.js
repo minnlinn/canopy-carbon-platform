@@ -15,7 +15,7 @@
     return dialog;
   }
   function status(value) { return `<span class="status ${escapeHtml(String(value || 'pending').toLowerCase().replace(/[^a-z0-9-]/g, '-'))}">${escapeHtml(value || 'Pending')}</span>`; }
-  function showError(error) { context.toast(error?.message || 'Could not load this section.'); }
+  function showError(error) { context.toast(error?.message || 'Could not load this section.', 'error'); }
   async function query(table, builder) {
     const result = await builder(context.db.from(table));
     if (result.error) throw result.error;
@@ -47,9 +47,9 @@
     return order;
   }
   async function completeDemo(orderId) {
-    await rpc('canopy_simulate_billing_payment', { p_order_id: orderId });
-    context.toast('Sandbox flow complete. This is not collected revenue.');
+    const payment = await rpc('canopy_simulate_billing_payment', { p_order_id: orderId });
     await context.refresh();
+    return payment;
   }
   async function startSubscription(orderType, title, benefits) {
     const accountStatus = await rpc('canopy_current_account_status');
@@ -64,7 +64,10 @@
       button.disabled = true; button.textContent = 'Confirming…';
       try {
         await completeDemo(order.id);
+        const activePlan = await subscription(orderType === 'partner_subscription' ? 'partner' : 'premium');
+        if (!isActive(activePlan)) throw new Error('Demo payment was confirmed, but the subscription is not active yet. Please refresh and try again.');
         const feedback = dialog.querySelector('#subscriptionResult'); feedback.className = 'feedback-message feedback-success'; feedback.textContent = '✓ Demo subscription confirmed. Your status and billing history are updating.';
+        context.toast(`✓ ${orderType === 'partner_subscription' ? 'Partner Portal' : 'Premium'} subscription is active. Demo payment confirmed.`, 'success');
         button.textContent = 'Confirmed';
         await context.refresh();
       } catch (error) { button.disabled = false; button.textContent = 'Confirm demo subscription'; const feedback = dialog.querySelector('#subscriptionResult'); feedback.className = 'feedback-message feedback-error'; feedback.textContent = error?.message || 'Could not confirm the demo subscription.'; }
@@ -82,7 +85,7 @@
   function bindCommon() {
     document.querySelectorAll('[data-demo-order]').forEach(button => button.addEventListener('click', async () => {
       button.disabled = true;
-      try { await completeDemo(button.dataset.demoOrder); } catch (error) { button.disabled = false; showError(error); }
+      try { await completeDemo(button.dataset.demoOrder); context.toast('✓ Demo payment confirmed. No real money was collected.', 'success'); } catch (error) { button.disabled = false; showError(error); }
     }));
     document.querySelectorAll('[data-subscribe]').forEach(button => button.addEventListener('click', async () => {
       button.disabled = true;
@@ -102,13 +105,14 @@
   }
 
   async function premiumView() {
-    const [plan, history, entitled] = await Promise.all([subscription('premium'), billingHistory('premium_subscription'), rpc('canopy_has_subscription', { p_plan: 'premium' })]);
+    const [plan, history, entitled, demo] = await Promise.all([subscription('premium'), billingHistory('premium_subscription'), rpc('canopy_has_subscription', { p_plan: 'premium' }), demoData()]);
     const active = isActive(plan) && Boolean(entitled);
     const openOrder = history.find(row => row.payment_status === 'pending');
     const checkoutOrder = context.pendingOrder?.order_type === 'premium_subscription' ? context.pendingOrder : openOrder;
     const newProjects = context.projects.filter(project => project.created_at && Date.now() - new Date(project.created_at).getTime() < 48 * 60 * 60 * 1000);
     const earlyNotice = newProjects.length ? `<div class="notice"><span class="notice-icon">✦</span><span><strong>Early project access</strong> ${newProjects.map(project => `${escapeHtml(project.name)} (${date(project.created_at)})`).join(', ')}. Availability is subject to inventory.</span></div>` : '<p class="revenue-note">No new project releases in the past 48 hours.</p>';
-    const contentStats = active ? `<section class="revenue-section"><h2>Premium tools</h2>${earlyNotice}<div class="metric-grid"><article><span>Tracked holdings</span><strong>${context.holdings.length}</strong></article><article><span>Credits held</span><strong>${context.holdings.reduce((total, item) => total + Number(item.quantity_tco2e || 0), 0).toLocaleString()} tCO₂e</strong></article><article><span>Available projects</span><strong>${context.projects.length}</strong></article></div><h3>Advanced market overview</h3><p>Price and availability are based only on current project listings. No market forecast is inferred.</p><div class="table-wrap"><table><thead><tr><th>Project</th><th>Type</th><th>Price</th><th>Available</th></tr></thead><tbody>${context.projects.map(project => `<tr><td>${escapeHtml(project.name)}</td><td>${escapeHtml(project.project_type)}</td><td>${cash(project.price_myr)} / tCO₂e</td><td>${Number(project.inventory_tco2e || 0).toLocaleString()} tCO₂e</td></tr>`).join('')}</tbody></table></div><p>Premium early access: newly published projects open to Premium immediately and to Free users after 48 hours, subject to inventory. Existing listings remain available to all eligible accounts.</p></section>` : `<section class="revenue-locked"><h2>Premium features are locked</h2><p>Detailed analytics, advanced market information and early project access require an active Premium subscription.</p></section>`;
+    const demoHoldings = new Map(); demo.ledger.forEach(row => demoHoldings.set(row.project_id, (demoHoldings.get(row.project_id) || 0) + Number(row.delta_tco2e || 0))); const held = [...demoHoldings.entries()].filter(([, quantity]) => quantity > 0); const listed = [...demo.projects.values()].filter(project => Number(project.simulated_inventory_tco2e || 0) >= 0.01);
+    const contentStats = active ? `<section class="revenue-section"><h2>Premium tools</h2>${earlyNotice}<p class="revenue-note">All values below are simulated only; no real carbon-credit ownership is represented.</p><div class="metric-grid"><article><span>Tracked demo holdings</span><strong>${held.length}</strong></article><article><span>Approved simulated tCO₂e</span><strong>${held.reduce((sum, [, quantity]) => sum + quantity, 0).toFixed(2)}</strong></article><article><span>Active demo listings</span><strong>${listed.length}</strong></article></div><h3>Approved simulated holdings</h3>${held.length ? `<div class="table-wrap"><table><thead><tr><th>Project</th><th>Quantity</th></tr></thead><tbody>${held.map(([id, quantity]) => `<tr><td>${escapeHtml(demo.projects.get(id)?.project_name || id)}</td><td>${quantity.toFixed(2)} tCO₂e</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No Admin-approved simulated holdings yet.</p>'}<h3>Active demo marketplace listings</h3><div class="table-wrap"><table><thead><tr><th>Project</th><th>Simulated price</th><th>Simulated quantity</th></tr></thead><tbody>${listed.map(project => `<tr><td>${escapeHtml(project.project_name)}</td><td>${cash(project.simulated_price_myr)} / tCO₂e</td><td>${Number(project.simulated_inventory_tco2e).toFixed(2)} tCO₂e</td></tr>`).join('')}</tbody></table></div></section>` : `<section class="revenue-locked"><h2>Premium features are locked</h2><p>Detailed analytics, advanced market information and early project access require an active Premium subscription.</p></section>`;
     content(`<div class="page-heading"><div><span class="eyebrow">SME PLAN</span><h1>Premium</h1><p>Free plan includes project browsing, basic portfolio tracking and transaction history.</p></div></div><div class="revenue-plan"><div><p class="eyebrow">PREMIUM PLAN</p><h2>RM250 / month</h2><p>Detailed portfolio analytics, advanced carbon-market information, early project notifications and 48-hour priority access to eligible new projects.</p></div><div><strong>Subscription status</strong><p>${status(plan?.status || 'Free plan')}</p><small>Renewal: ${date(plan?.renewal_at)}</small>${active && plan.status === 'active_demo' ? `<p>${demoLabel}</p>` : ''}${active ? '<button class="btn secondary" data-cancel-plan="premium">Cancel subscription</button>' : '<button class="btn primary" data-subscribe="premium_subscription">Upgrade to Premium</button>'}</div></div>${checkout(checkoutOrder, 'Premium monthly subscription')}${contentStats}<section class="revenue-section"><h2>Billing history</h2>${historyTable(history)}</section>`);
     bindCommon();
   }
@@ -132,6 +136,41 @@
       y += wrapped.length * 5 + 2;
     });
     doc.save(filename);
+  }
+  function xlsxBook(sheets, filename) {
+    const XLSX = window.XLSX; if (!XLSX) throw new Error('Excel export support did not load. Reconnect and try again.');
+    const book = XLSX.utils.book_new();
+    sheets.forEach(({ name, rows, headerRow = 0, currencyColumns = [], filter = true }) => {
+      const sheet = XLSX.utils.aoa_to_sheet(rows);
+      const width = Math.max(...rows.map(row => row.length));
+      if (filter) sheet['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: headerRow, c: 0 }, e: { r: Math.max(headerRow, rows.length - 1), c: Math.max(0, width - 1) } }) };
+      sheet['!freeze'] = { xSplit: 0, ySplit: headerRow + 1 };
+      sheet['!cols'] = Array.from({ length: width }, (_, index) => ({ wch: Math.min(42, Math.max(14, ...rows.map(row => String(row[index] ?? '').length + 2))) }));
+      currencyColumns.forEach(column => { for (let row = headerRow + 1; row < rows.length; row += 1) { const cell = sheet[XLSX.utils.encode_cell({ r: row, c: column })]; if (cell && typeof cell.v === 'number') cell.z = 'RM #,##0.00'; } });
+      XLSX.utils.book_append_sheet(book, sheet, name);
+    });
+    XLSX.writeFile(book, filename);
+  }
+  const inPeriod = (value, start, end) => { const day = String(value || '').slice(0, 10); return (!start || day >= start) && (!end || day <= end); };
+  async function demoData(start = '', end = '') {
+    const [purchases, ledger, demoProjects, wallet] = await Promise.all([
+      query('canopy_demo_purchase_requests', table => table.select('*').order('created_at', { ascending: true })),
+      query('canopy_demo_entitlement_ledger', table => table.select('*').eq('event_type', 'allocation').order('created_at', { ascending: true })),
+      query('canopy_demo_projects', table => table.select('id,project_name,simulated_price_myr,simulated_inventory_tco2e').order('project_name')),
+      query('canopy_demo_wallet_transactions', table => table.select('*').order('created_at', { ascending: true }))
+    ]);
+    return { purchases: purchases.filter(row => inPeriod(row.created_at, start, end)), ledger: ledger.filter(row => inPeriod(row.created_at, start, end)), projects: new Map(demoProjects.map(row => [row.id, row])), wallet: wallet.filter(row => inPeriod(row.created_at, start, end)) };
+  }
+  async function downloadReportExcel(report) {
+    const data = await demoData(report.period_start, report.period_end); const company = context.profile.company_name || context.profile.contact_name || 'SME';
+    const holdings = new Map(); data.ledger.forEach(row => holdings.set(row.project_id, (holdings.get(row.project_id) || 0) + Number(row.delta_tco2e || 0)));
+    let running = 0; const walletRows = data.wallet.map(row => { running += Number(row.amount_myr || 0); return [date(row.created_at), row.transaction_type, row.note, Number(row.amount_myr) > 0 ? Number(row.amount_myr) : '', Number(row.amount_myr) < 0 ? Math.abs(Number(row.amount_myr)) : '', running]; });
+    xlsxBook([
+      { name: 'Summary', filter: false, rows: [['CANOPY DEMO — SIMULATED DATA, NOT REAL CARBON CREDITS'], ['Company', company], ['Reporting period', `${report.period_start} to ${report.period_end}`], ['Note', 'No environmental impact, certificates, or real carbon-credit ownership is inferred.']] },
+      { name: 'Transaction History', currencyColumns: [3, 4, 5, 6], rows: [['Date', 'Project', 'Quantity tCO2e', 'Unit price MYR', 'Credit value MYR', 'Fee MYR', 'Total MYR', 'Status'], ...data.purchases.map(row => { const project = data.projects.get(row.project_id); return [date(row.created_at), project?.project_name || row.project_id, Number(row.quantity_tco2e), Number(row.simulated_unit_price_myr), Number(row.simulated_credit_value_myr), Number(row.simulated_platform_fee_myr), Number(row.simulated_total_myr), row.request_status]; })] },
+      { name: 'Carbon Holdings', rows: [['Project', 'Approved simulated quantity tCO2e'], ...[...holdings.entries()].map(([id, quantity]) => [data.projects.get(id)?.project_name || id, quantity])] },
+      { name: 'Demo Wallet', currencyColumns: [3, 4, 5], rows: [['Date', 'Type', 'Description', 'Money in MYR', 'Money out MYR', 'Running balance MYR'], ...walletRows] }
+    ], `Canopy_Demo_Carbon_ESG_Report_${report.period_start}_${report.period_end}.xlsx`);
   }
   function reportLines(data) {
     const lines = [
@@ -158,28 +197,33 @@
   async function getReportRows() {
     return query('canopy_report_requests', table => table.select('*').eq('user_id', context.profile.id).order('created_at', { ascending: false }));
   }
+  async function startReportPayment(start, end) {
+    const order = await createCheckout('esg_report', start, end); const wallet = await rpc('canopy_demo_wallet_summary'); const balance = Number(wallet.balance_myr || 0); const amount = Number(order.amount_myr || 0); const shortfall = Math.max(0, amount - balance); const enough = balance >= amount;
+    const dialog = modal(`<h2>Confirm Carbon & ESG report</h2><dl class="details"><div><dt>Report fee</dt><dd>${cash(amount)}</dd></div><div><dt>Demo RM Wallet</dt><dd>${cash(balance)}</dd></div><div><dt>Remaining after payment</dt><dd>${cash(Math.max(0,balance-amount))}</dd></div></dl><p class="fine-print">Demo only — no real payment. The workbook includes only available Canopy records.</p><button class="btn secondary" id="openWallet" type="button">Open Demo RM Wallet</button> <button class="btn primary" id="confirmReport" ${enough?'':'disabled'}>Confirm demo payment</button><p id="reportPaymentResult" class="feedback-message ${enough?'':'feedback-error'}">${enough?'':`Insufficient demo wallet balance. Please top up RM ${shortfall.toFixed(2)} to complete this demo purchase.`}</p>`);
+    dialog.querySelector('#openWallet').onclick=()=>{dialog.close();context.openWallet?.();}; const button=dialog.querySelector('#confirmReport'); button.onclick=async()=>{button.disabled=true;button.textContent='Confirming…';try{await completeDemo(order.id);const feedback=dialog.querySelector('#reportPaymentResult');feedback.className='feedback-message feedback-success';feedback.textContent='✓ Demo payment confirmed. Your Excel report is ready in Report History.';context.toast('✓ Demo report payment confirmed. No real money was collected.','success');await context.refresh();}catch(error){button.disabled=false;button.textContent='Confirm demo payment';const feedback=dialog.querySelector('#reportPaymentResult');feedback.className='feedback-message feedback-error';feedback.textContent=error?.message||'Could not confirm this demo payment.';}};
+  }
   async function reportsView() {
     const rows = await getReportRows();
     const orderIds = rows.map(row => row.billing_order_id);
     const orders = orderIds.length ? await query('canopy_billing_orders', table => table.select('*').in('id', orderIds)) : [];
     const orderMap = new Map(orders.map(order => [order.id, order]));
     const canDownload = row => ['ready', 'ready_demo'].includes(row.status) && ['paid', 'sandbox_paid'].includes(orderMap.get(row.billing_order_id)?.payment_status);
-    content(`<div class="page-heading"><div><span class="eyebrow">CARBON & ESG REPORTING</span><h1>Reports</h1><p>Request an evidence-based report using available Canopy records.</p></div></div><section class="revenue-checkout"><div><h2>Carbon & ESG report</h2><p>Report fee: <strong>${cash(500)}</strong></p><p>Includes company details, holdings, purchased/sold/retired credits, project information, transaction history and reporting period. Missing source data is labelled; no unsupported impact claims are generated.</p></div><form id="reportOrderForm" class="revenue-period"><label>From<input type="date" name="start" required value="${new Date().getFullYear()}-01-01"></label><label>To<input type="date" name="end" required value="${new Date().toISOString().slice(0, 10)}"></label><button class="btn primary" type="submit">Generate report</button></form></section>${demoLabel}${context.pendingOrder?.order_type === 'esg_report' ? checkout(context.pendingOrder, 'Carbon & ESG report') : ''}<section class="revenue-section"><h2>Report history</h2>${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Requested</th><th>Period</th><th>Fee</th><th>Payment</th><th>Report</th></tr></thead><tbody>${rows.map(row => { const order = orderMap.get(row.billing_order_id); return `<tr><td>${date(row.created_at)}</td><td>${escapeHtml(row.period_start)} – ${escapeHtml(row.period_end)}</td><td>${cash(order?.amount_myr)}</td><td>${status(order?.payment_status || row.status)}</td><td>${canDownload(row) ? `<button class="btn secondary" data-download-report="${row.id}">Download PDF</button>` : row.status === 'pending' ? `<button class="btn primary" data-demo-order="${row.billing_order_id}">Complete sandbox checkout</button>` : 'Not authorized'}</td></tr>`; }).join('')}</tbody></table></div>` : '<p class="muted">No reports requested yet.</p>'}</section>`);
+    content(`<div class="page-heading"><div><span class="eyebrow">CARBON & ESG REPORTING</span><h1>Reports</h1><p>Generate an Excel workbook from available simulated Canopy records.</p></div></div><section class="revenue-checkout"><div><h2>Carbon & ESG report</h2><p>Report fee: <strong>${cash(500)}</strong></p><p>Demo only — no real payment or carbon credits. Missing data is not invented.</p></div><form id="reportOrderForm" class="revenue-period"><label>From<input type="date" name="start" required value="${new Date().getFullYear()}-01-01"></label><label>To<input type="date" name="end" required value="${new Date().toISOString().slice(0, 10)}"></label><button class="btn primary" type="submit">Generate Excel report</button></form></section>${demoLabel}<section class="revenue-section"><h2>Report history</h2>${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Requested</th><th>Period</th><th>Fee</th><th>Payment</th><th>Report</th></tr></thead><tbody>${rows.map(row => { const order = orderMap.get(row.billing_order_id); return `<tr><td>${date(row.created_at)}</td><td>${escapeHtml(row.period_start)} – ${escapeHtml(row.period_end)}</td><td>${cash(order?.amount_myr)}</td><td>${status(order?.payment_status || row.status)}</td><td>${canDownload(row) ? `<button class="btn secondary" data-download-report="${row.id}">Download Excel</button>` : row.status === 'pending' ? `<button class="btn primary" data-demo-order="${row.billing_order_id}">Complete demo payment</button>` : 'Not authorized'}</td></tr>`; }).join('')}</tbody></table></div>` : '<p class="muted">No reports requested yet.</p>'}</section>`);
     document.querySelector('#reportOrderForm').addEventListener('submit', async event => {
       event.preventDefault();
       const form = new FormData(event.currentTarget);
       const start = form.get('start');
       const end = form.get('end');
-      if (end < start) { context.toast('The report end date must be on or after the start date.'); return; }
+      if (end < start) { context.toast('The report end date must be on or after the start date.', 'error'); return; }
       const button = event.submitter;
       if (button) button.disabled = true;
-      try { await createCheckout('esg_report', start, end); } catch (error) { if (button) button.disabled = false; showError(error); }
+      try { await startReportPayment(start, end); } catch (error) { if (button) button.disabled = false; showError(error); }
     });
     document.querySelectorAll('[data-download-report]').forEach(button => button.addEventListener('click', async () => {
       button.disabled = true;
       try {
-        const data = await rpc('canopy_report_data', { p_report_id: button.dataset.downloadReport });
-        downloadPdf(`Canopy Carbon & ESG Report · ${data.company.company_name || 'SME'}`, reportLines(data), `canopy-report-${data.report.period_start}-${data.report.period_end}.pdf`);
+        await downloadReportExcel(rows.find(row => row.id === button.dataset.downloadReport));
+        context.toast('✓ Demo Carbon & ESG Excel report downloaded. Simulated data only.', 'success');
       } catch (error) { showError(error); }
       finally { button.disabled = false; }
     }));
@@ -216,7 +260,7 @@
     content(`<div class="page-heading"><div><span class="eyebrow">PARTNER PORTAL</span><h1>Partner dashboard</h1><p>Manage referrals, authorized client data and your subscription.</p></div></div><div class="revenue-plan"><div><p class="eyebrow">PARTNER SUBSCRIPTION</p><h2>${cash(500)} / month</h2><p>Referral management, client analytics, project information and reporting tools.</p></div><div><strong>Subscription status</strong><p>${status(plan?.status || 'Inactive')}</p><small>Renewal: ${date(plan?.renewal_at)}</small>${active && plan.status === 'active_demo' ? `<p>${demoLabel}</p>` : ''}${active ? '<button class="btn secondary" data-cancel-plan="partner">Cancel subscription</button>' : '<button class="btn primary" data-subscribe="partner_subscription">Subscribe</button>'}</div></div>${checkout(checkoutOrder, 'Partner Portal monthly subscription')}${portal}<section class="revenue-section"><h2>Billing history</h2>${historyTable(history)}</section>`);
     if (active) {
       document.querySelector('#copyReferral').addEventListener('click', async () => {
-        try { await navigator.clipboard.writeText(linkValue()); context.toast('Referral link copied.'); } catch { context.toast('Copy the referral link from the field.'); }
+        try { await navigator.clipboard.writeText(linkValue()); context.toast('✓ Referral link copied successfully!', 'success'); } catch { context.toast('Could not copy the referral link. Please copy it from the field.', 'error'); }
       });
       document.querySelectorAll('[data-client-data]').forEach(button => button.addEventListener('click', async () => {
         button.disabled = true;
@@ -368,8 +412,9 @@
     const wallet = await rpc('canopy_demo_wallet_summary');
     const transactions = wallet.transactions || [];
     const feedback=context.walletNotice||null; context.walletNotice=null;
-    content(`<div class="page-heading"><div><span class="eyebrow">SIMULATED FUNDS</span><h1>Demo RM Wallet</h1><p>Demo only — no real money. Wallet funds support simulated Canopy purchase requests only.</p></div></div><div class="metric-grid"><article><span>Demo balance</span><strong>${cash(wallet.balance_myr)}</strong></article></div><section class="revenue-section"><h2>Top up demo balance</h2><form id="walletTopUpForm" class="revenue-inline-form"><label>Amount (MYR)<input name="amount" type="number" min="1" step="0.01" required></label><button class="btn primary" type="submit">Add demo funds</button></form>${feedback?`<p class="feedback-message feedback-${feedback.type}" aria-live="polite">${escapeHtml(feedback.text)}</p>`:''}</section><section class="revenue-section"><h2>Wallet transactions</h2>${transactions.length?`<div class="table-wrap"><table><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Note</th></tr></thead><tbody>${transactions.map(row=>`<tr><td>${date(row.created_at)}</td><td>${escapeHtml(row.transaction_type)}</td><td>${cash(row.amount_myr)}</td><td>${escapeHtml(row.note||'—')}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No demo wallet transactions yet.</p>'}</section>`);
-    document.querySelector('#walletTopUpForm').addEventListener('submit', async event => { event.preventDefault(); const button=event.submitter; if(button)button.disabled=true; try { await rpc('canopy_demo_wallet_top_up',{p_amount_myr:Number(new FormData(event.currentTarget).get('amount')),p_idempotency_key:crypto.randomUUID()}); context.walletNotice={type:'success',text:'✓ Demo wallet top-up recorded. No real money was received.'}; await mount('wallet',context); } catch(error) { if(button)button.disabled=false; context.walletNotice={type:'error',text:error?.message||'Could not add demo funds.'}; await mount('wallet',context); } });
+    content(`<div class="page-heading"><div><span class="eyebrow">SIMULATED FUNDS</span><h1>Demo RM Wallet</h1><p>Demo only — no real money. Wallet funds support simulated Canopy actions only.</p></div></div><div class="metric-grid"><article><span>Demo balance</span><strong>${cash(wallet.balance_myr)}</strong></article></div><section class="revenue-section"><h2>Top up demo balance</h2><form id="walletTopUpForm" class="revenue-inline-form"><label>Amount (MYR)<input name="amount" type="number" min="1" step="0.01" required></label><button class="btn primary" type="submit">Add demo funds</button></form>${feedback?`<p class="feedback-message feedback-${feedback.type}" aria-live="polite">${escapeHtml(feedback.text)}</p>`:''}</section><section class="revenue-section"><h2>Wallet transactions</h2><form id="walletExportForm" class="revenue-inline-form"><label>From<input name="start" type="date"></label><label>To<input name="end" type="date"></label><button class="btn secondary" type="submit">Download Transaction History (Excel)</button></form>${transactions.length?`<div class="table-wrap"><table><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Note</th></tr></thead><tbody>${transactions.map(row=>`<tr><td>${date(row.created_at)}</td><td>${escapeHtml(row.transaction_type)}</td><td>${cash(row.amount_myr)}</td><td>${escapeHtml(row.note||'—')}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No demo wallet transactions yet.</p>'}</section>`);
+    document.querySelector('#walletTopUpForm').addEventListener('submit', async event => { event.preventDefault(); const button=event.submitter; if(button)button.disabled=true; try { await rpc('canopy_demo_wallet_top_up',{p_amount_myr:Number(new FormData(event.currentTarget).get('amount')),p_idempotency_key:crypto.randomUUID()}); context.walletNotice={type:'success',text:'✓ Demo wallet top-up recorded. No real money was received.'}; context.toast(context.walletNotice.text,'success'); await mount('wallet',context); } catch(error) { if(button)button.disabled=false; context.walletNotice={type:'error',text:error?.message||'Could not add demo funds.'}; context.toast(context.walletNotice.text,'error'); await mount('wallet',context); } });
+    document.querySelector('#walletExportForm').addEventListener('submit', async event => { event.preventDefault(); const button=event.submitter; if(button?.disabled)return; const values=new FormData(event.currentTarget); const start=values.get('start'); const end=values.get('end'); if(end&&start&&end<start){context.toast('The end date must be on or after the start date.','error');return;} const rows=transactions.filter(row=>inPeriod(row.created_at,start,end)).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)); if(!rows.length){context.toast('No wallet transactions match this date range.','error');return;} if(button)button.disabled=true; try{let running=transactions.filter(row=>start&&String(row.created_at).slice(0,10)<start).reduce((sum,row)=>sum+Number(row.amount_myr||0),0); const opening=running; const exported=rows.map(row=>{running+=Number(row.amount_myr||0);return [new Date(row.created_at).toLocaleString('en-MY'),row.transaction_type,row.note||'',Number(row.amount_myr)>0?Number(row.amount_myr):'',Number(row.amount_myr)<0?Math.abs(Number(row.amount_myr)): '',running];}); const inflows=rows.filter(row=>Number(row.amount_myr)>0).reduce((sum,row)=>sum+Number(row.amount_myr),0);const outflows=rows.filter(row=>Number(row.amount_myr)<0).reduce((sum,row)=>sum+Math.abs(Number(row.amount_myr)),0);xlsxBook([{name:'Demo Wallet',headerRow:6,currencyColumns:[3,4,5],rows:[['DEMO ONLY — NO REAL MONEY'],['Opening balance MYR',opening],['Total inflows MYR',inflows],['Total outflows MYR',outflows],['Closing balance MYR',running],[],['Date / time','Transaction type','Description','Money in MYR','Money out MYR','Running balance MYR'],...exported]}],`Canopy_Demo_Wallet_Transactions_${new Date().toISOString().slice(0,10)}.xlsx`);context.toast('✓ Demo wallet transaction history downloaded. No real money.','success');}catch(error){context.toast(error?.message||'Could not create the Demo Wallet Excel export.','error');}finally{if(button)button.disabled=false;} });
   }
 
   async function mount(view, values) {

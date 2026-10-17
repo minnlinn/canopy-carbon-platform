@@ -112,7 +112,7 @@
         const request = await rpc('canopy_request_demo_purchase', { p_project_id: project.id, p_quantity: Number(input.value) });
         result.className = 'feedback-message feedback-success'; result.textContent = `✓ ${Number(request.quantity_tco2e).toFixed(2)} tCO₂e submitted. Pending Admin approval. Demo funds reserved.`;
         submit.textContent = 'Submitted';
-        context.toast('Demo purchase submitted and awaiting Admin review.');
+        context.toast('✓ Demo purchase submitted for Admin approval. Demo funds reserved.', 'success');
         await mount('market', context);
       } catch (error) { submit.disabled = false; submit.textContent = 'Confirm Demo Purchase'; result.className = 'feedback-message feedback-error'; result.textContent = error?.message || 'Could not submit this demo purchase.'; }
     });
