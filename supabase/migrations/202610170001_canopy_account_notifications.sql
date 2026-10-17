@@ -1,5 +1,35 @@
-alter table public.profiles
-  add column if not exists verification_status text default 'pending';
+do $$
+begin
+  if to_regclass('public.profiles') is null then
+    raise exception 'Canopy account notifications require the existing public.profiles table.';
+  end if;
+  if to_regtype('public.user_role') is null or to_regtype('public.verification_status') is null then
+    raise exception 'Canopy account notifications require the existing public.user_role and public.verification_status enum types.';
+  end if;
+  if not exists (
+    select 1 from pg_attribute
+    where attrelid='public.profiles'::regclass and attname='id' and not attisdropped and atttypid='uuid'::regtype
+  ) or not exists (
+    select 1 from pg_attribute
+    where attrelid='public.profiles'::regclass and attname='role' and not attisdropped and atttypid='public.user_role'::regtype
+  ) or not exists (
+    select 1 from pg_attribute
+    where attrelid='public.profiles'::regclass and attname='verification_status' and not attisdropped and atttypid='public.verification_status'::regtype
+  ) or not exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='profiles' and column_name='review_note'
+  ) then
+    raise exception 'Existing public.profiles columns do not match the Canopy account contract.';
+  end if;
+  if not exists (select 1 from pg_enum where enumtypid='public.user_role'::regtype and enumlabel='sme')
+     or not exists (select 1 from pg_enum where enumtypid='public.user_role'::regtype and enumlabel='partner')
+     or not exists (select 1 from pg_enum where enumtypid='public.user_role'::regtype and enumlabel='admin')
+     or not exists (select 1 from pg_enum where enumtypid='public.verification_status'::regtype and enumlabel='pending')
+     or not exists (select 1 from pg_enum where enumtypid='public.verification_status'::regtype and enumlabel='verified') then
+    raise exception 'Canopy account notifications require SME, Partner, Admin, pending and verified enum values.';
+  end if;
+end;
+$$;
 
 alter table public.profiles
   alter column verification_status set default 'pending';
@@ -37,6 +67,7 @@ begin
 end;
 $$;
 
+drop trigger if exists canopy_prepare_profile_before_insert on public.profiles;
 create trigger canopy_prepare_profile_before_insert
 before insert on public.profiles
 for each row execute function public.canopy_prepare_profile();
@@ -58,6 +89,7 @@ begin
 end;
 $$;
 
+drop trigger if exists canopy_protect_profile_security_fields_before_update on public.profiles;
 create trigger canopy_protect_profile_security_fields_before_update
 before update on public.profiles
 for each row execute function public.canopy_protect_profile_security_fields();
@@ -87,6 +119,7 @@ begin
 end;
 $$;
 
+drop trigger if exists canopy_queue_registration_notification_after_insert on public.profiles;
 create trigger canopy_queue_registration_notification_after_insert
 after insert on public.profiles
 for each row execute function public.canopy_queue_registration_notification();

@@ -26,7 +26,9 @@ begin
     raise exception 'public.profiles.role must support the partner enum value before applying this migration.';
   end if;
   if not exists(select 1 from information_schema.columns where table_schema='public' and table_name='profiles' and column_name='verification_status')
-     or not exists(select 1 from information_schema.columns where table_schema='public' and table_name='profiles' and column_name='company_name') then
+     or not exists(select 1 from information_schema.columns where table_schema='public' and table_name='profiles' and column_name='company_name')
+     or not exists(select 1 from information_schema.columns where table_schema='public' and table_name='profiles' and column_name='review_note')
+     or not exists(select 1 from information_schema.columns where table_schema='public' and table_name='profiles' and column_name='updated_at') then
     raise exception 'Existing profile columns do not match the Canopy account contract.';
   end if;
 end;
@@ -140,7 +142,7 @@ create table if not exists public.canopy_developer_commission_arrangements (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id),
   developer_id uuid not null references auth.users(id),
-  commission_rate numeric(6,5) not null check (commission_rate>=0 and commission_rate<=1),
+  commission_rate numeric(6,5) not null check (commission_rate = 0.015),
   agreement_reference text not null,
   active boolean not null default false,
   starts_at timestamptz not null default now(),
@@ -190,6 +192,14 @@ $$;
 revoke all on function public.canopy_partner_can_access_sme(uuid) from public,anon;
 grant execute on function public.canopy_partner_can_access_sme(uuid) to authenticated;
 
+drop policy if exists canopy_account_applications_read on public.canopy_account_applications;
+drop policy if exists canopy_account_review_audit_admin_read on public.canopy_account_review_audit;
+drop policy if exists canopy_demo_projects_public_read on public.canopy_demo_projects;
+drop policy if exists canopy_demo_purchase_owner_admin_read on public.canopy_demo_purchase_requests;
+drop policy if exists canopy_demo_ledger_owner_admin_read on public.canopy_demo_entitlement_ledger;
+drop policy if exists canopy_demo_project_audit_admin_read on public.canopy_demo_project_audit;
+drop policy if exists canopy_partner_applications_self_admin_read on public.canopy_partner_applications;
+drop policy if exists canopy_developer_arrangements_admin_read on public.canopy_developer_commission_arrangements;
 create policy canopy_account_applications_read on public.canopy_account_applications for select to authenticated
   using (user_id=auth.uid() or public.is_admin());
 create policy canopy_account_review_audit_admin_read on public.canopy_account_review_audit for select to authenticated
@@ -233,6 +243,7 @@ begin
   return new;
 end;
 $$;
+drop trigger if exists canopy_developer_commission_agreement_gate on public.canopy_developer_commissions;
 create trigger canopy_developer_commission_agreement_gate
 before insert on public.canopy_developer_commissions
 for each row execute function public.canopy_require_developer_commission_agreement();
@@ -246,11 +257,12 @@ as $$
 declare arrangement public.canopy_developer_commission_arrangements; previous_values jsonb;
 begin
   if auth.uid() is distinct from p_admin_id or not public.is_admin() then raise exception 'Administrator access required.' using errcode='42501'; end if;
-  if p_commission_rate<0 or p_commission_rate>1 or length(trim(coalesce(p_agreement_reference,'')))<3 or length(trim(coalesce(p_note,'')))<3 then
-    raise exception 'A valid commission rate, explicit agreement reference and audit note are required.' using errcode='22023';
+  if p_commission_rate<>0.015 or length(trim(coalesce(p_agreement_reference,'')))<3 or length(trim(coalesce(p_note,'')))<3 then
+    raise exception 'A 1.5%% commission rate, explicit agreement reference and audit note are required.' using errcode='22023';
   end if;
-  if not exists(select 1 from public.projects where id=p_project_id)
-     or not exists(select 1 from public.profiles where id=p_developer_id) then raise exception 'Project or developer account not found.' using errcode='P0002'; end if;
+  if not exists(select 1 from public.canopy_project_developers where project_id=p_project_id and developer_id=p_developer_id) then
+    raise exception 'Assign the developer to the project before recording a commission agreement.' using errcode='22023';
+  end if;
   select to_jsonb(a) into previous_values from public.canopy_developer_commission_arrangements a where project_id=p_project_id and developer_id=p_developer_id for update;
   insert into public.canopy_developer_commission_arrangements(project_id,developer_id,commission_rate,agreement_reference,active,created_by,starts_at,ends_at)
   values(p_project_id,p_developer_id,p_commission_rate,trim(p_agreement_reference),p_active,p_admin_id,now(),null)
@@ -263,25 +275,8 @@ begin
 end;
 $$;
 
-create or replace function public.canopy_partner_can_access_sme(p_sme_id uuid)
-returns boolean language sql stable security definer
-set search_path=pg_catalog,public,auth
-as $$
-  select exists(
-    select 1 from public.profiles partner
-    join public.canopy_subscriptions subscription on subscription.user_id=partner.id
-      and subscription.plan='partner' and subscription.status in ('active','active_demo')
-      and (subscription.renewal_at is null or subscription.renewal_at>now())
-    join public.canopy_partner_client_consents consent on consent.partner_id=partner.id
-      and consent.sme_id=p_sme_id and consent.revoked_at is null
-    where partner.id=auth.uid() and partner.role::text='partner'
-      and partner.verification_status::text='verified'
-  );
-$$;
-
-revoke all on function public.canopy_partner_can_access_sme(uuid) from public,anon;
-grant execute on function public.canopy_partner_can_access_sme(uuid) to authenticated;
-
+drop policy if exists canopy_holdings_partner_consent_gate on public.holdings;
+drop policy if exists canopy_requests_partner_consent_gate on public.carbon_requests;
 create policy canopy_holdings_partner_consent_gate on public.holdings as restrictive for select to public
   using (public.is_admin() or owner_id=auth.uid() or public.canopy_partner_can_access_sme(owner_id));
 create policy canopy_requests_partner_consent_gate on public.carbon_requests as restrictive for select to public
@@ -311,6 +306,7 @@ begin
   return new;
 end;
 $$;
+drop trigger if exists zzzz_canopy_assign_signup_role_before_insert on public.profiles;
 create trigger zzzz_canopy_assign_signup_role_before_insert
 before insert on public.profiles
 for each row execute function public.canopy_assign_signup_role();
@@ -333,6 +329,7 @@ begin
   return new;
 end;
 $$;
+drop trigger if exists canopy_capture_account_application_after_insert on public.profiles;
 create trigger canopy_capture_account_application_after_insert
 after insert on public.profiles for each row execute function public.canopy_capture_account_application();
 

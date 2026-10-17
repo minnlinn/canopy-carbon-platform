@@ -169,9 +169,14 @@
     let analytics = { total_referred: 0, verified_referred: 0, transaction_volume_myr: 0, credits_purchased: 0, credits_retired: 0, reward_type: 'disabled' };
     let clients = [];
     if (active) {
-      [code, analytics, clients] = await Promise.all([
-        rpc('canopy_create_partner_code'), rpc('canopy_partner_analytics'), rpc('canopy_partner_clients')
+      [code, clients] = await Promise.all([
+        rpc('canopy_create_partner_code'), rpc('canopy_partner_clients')
       ]);
+      analytics = {
+        ...analytics,
+        total_referred: clients.length,
+        verified_referred: clients.filter(client => client.verification_status === 'verified').length
+      };
       const rewardEstimate = analytics.reward_type === 'percentage'
         ? Number(analytics.transaction_volume_myr || 0) * Number(analytics.reward_percent || 0)
         : analytics.reward_type === 'fixed_myr'
@@ -335,6 +340,10 @@
   async function mount(view, values) {
     context = { ...values, view };
     try {
+      if (context.profile?.role === 'partner' && context.profile?.verification_status !== 'verified') {
+        content(`<div class="page-heading"><div><span class="eyebrow">PARTNER PORTAL</span><h1>Verification required</h1><p>Your Partner application is ${escapeHtml(context.profile?.verification_status || 'pending')}. An Admin must verify the organisation before Partner Portal or subscription features can be used.</p></div></div><section class="revenue-locked"><h2>Partner access is unavailable</h2><p>You can sign out while the application is being reviewed. No subscription, referral, client-data, project-information, or reporting action is available until verification is complete.</p></section>`);
+        return;
+      }
       if (view === 'premium') return await premiumView();
       if (view === 'reports') return await reportsView();
       if (view === 'partner') return await partnerView();

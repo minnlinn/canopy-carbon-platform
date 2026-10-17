@@ -139,8 +139,9 @@ RM500/report Carbon & ESG, 1.5% separate project-developer commission, and
 RM500/month Partner Portal. The UI previews purchase fee as an addition and
 sale fee as a deduction. Existing carbon request RPCs continue to approve and
 settle trades. On future completed buy/sell requests, the additive revenue
-migration records charges and developer invoices; an Admin must assign a
-developer to a project before developer commission is invoiced.
+migration records charges. A developer commission is created only when an
+Admin has both assigned the developer and recorded an active 1.5% agreement
+reference for that project; assignment alone creates no entitlement.
 
 The included checkout is explicitly sandbox/demo. It stores sandbox_paid, does
 not collect money, and is excluded from actual revenue totals. A live payment
@@ -162,6 +163,7 @@ project):
    supabase/migrations/202610170001_canopy_account_notifications.sql
    supabase/migrations/202610170002_five_stream_revenue.sql
    supabase/migrations/202610170003_demo_projects_and_partner_registration.sql
+   supabase/migrations/202610170004_enable_demo_project_listings.sql
 You may run the SQL files in Supabase SQL Editor in that order instead. Do not
 re-run migration 001 if it was already applied manually; check Supabase
 migration history first. Stop if the preflight check fails; compare the live
@@ -177,7 +179,7 @@ Partner client holdings and transactions are returned only after the SME grants
 consent. Referral rewards start disabled and require an Admin-configured rate.
 
 When deploying, ensure Vercel serves revenue.css, revenue-platform.js,
-canopy-projects.css and canopy-projects.js and wait for the Canopy PWA shell v8
+canopy-projects.css and canopy-projects.js and wait for the Canopy PWA shell v9
 update. PDF export requires the jsPDF CDN while online; the rest of the
 workspace shell is cached for offline launch.
 
@@ -217,6 +219,32 @@ SQL Editor only after reviewing the complete migration and confirming the
 preflight requirements. No BCX purchase, external registry retirement, or
 real-credit transfer is implemented; all newly added marketplace trading is
 simulated and must be enabled/configured by an Admin.
+
+DEMONSTRATION LISTING SETTINGS (MIGRATION 004)
+Migration 202610170004_enable_demo_project_listings.sql is additive and updates
+only the four separate Canopy demonstration records created by migration 003.
+It assigns clearly simulated MYR prices and inventories, enables 0.01 tCO2e
+demo-purchase requests, and does not touch legacy projects, real holdings,
+transactions, accounts, or revenue. Run it only after migration 003 has
+completed successfully.
+
+ACCOUNT SUSPENSION CONTROLS (MIGRATION 005)
+Migration 202610170005_account_access_controls.sql is additive and must be
+run only after migrations 001–004. It retains existing Admin, SME and Partner
+records. It adds an account-access audit trail plus verified/pending/rejected/
+suspended status handling without modifying the existing verification enum.
+Suspended accounts are blocked by the database from new legacy carbon requests,
+demo purchases and billing orders. Premium and Partner subscription checks also
+require an active verified account. Existing records are retained.
+
+After reviewing and running migration 005, deploy the updated existing
+account-workflow Edge Function. It keeps the notification webhook/email flow,
+and adds the Admin-only account list plus approve, reject, suspend and
+reactivate actions. Set CANOPY_ALLOWED_ORIGINS to a comma-separated list of
+the deployed site URL and any approved local development URLs before deploy.
+The function uses SUPABASE_SERVICE_ROLE_KEY only on the server; never place it
+in config.js or any browser source. Suspension also invalidates the affected
+user's refresh sessions through Supabase Auth.
 
 PASSWORD RECOVERY AND SUPABASE AUTH
 The recovery email redirects to:

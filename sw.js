@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'canopy-shell-v8';
+const CACHE_NAME = 'canopy-shell-v9';
 const SHELL_FILES = [
   './',
   './index.html',

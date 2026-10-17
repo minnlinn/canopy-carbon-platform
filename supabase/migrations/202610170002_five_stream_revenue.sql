@@ -14,16 +14,24 @@ begin
      or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='carbon_requests' and column_name='project_id')
      or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='carbon_requests' and column_name='request_type')
      or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='carbon_requests' and column_name='quantity_tco2e')
+     or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='carbon_requests' and column_name='requester_id')
+     or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='carbon_requests' and column_name='recipient_id')
+     or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='carbon_requests' and column_name='price_myr')
+     or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='holdings' and column_name='owner_id')
       or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='carbon_requests' and column_name='status')
       or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='carbon_requests' and column_name='created_at')
       or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='projects' and column_name='listing_status')
       or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='profiles' and column_name='company_name')
+      or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='profiles' and column_name='registration_number')
+      or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='profiles' and column_name='contact_name')
+      or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='profiles' and column_name='sector')
       or not exists (select 1 from information_schema.columns where table_schema='public' and table_name='profiles' and column_name='verification_status') then
     raise exception 'Canopy revenue migration prerequisites do not match the app data contract. Review public schema columns before applying.';
   end if;
     if exists(select 1 from information_schema.columns where table_schema='public' and table_name='profiles' and column_name='id' and data_type<>'uuid')
       or exists(select 1 from information_schema.columns where table_schema='public' and table_name='projects' and column_name='id' and data_type<>'uuid')
-      or exists(select 1 from information_schema.columns where table_schema='public' and table_name='carbon_requests' and column_name in ('id','project_id') and data_type<>'uuid') then
+      or exists(select 1 from information_schema.columns where table_schema='public' and table_name='carbon_requests' and column_name in ('id','project_id','requester_id','recipient_id') and data_type<>'uuid')
+      or exists(select 1 from information_schema.columns where table_schema='public' and table_name='holdings' and column_name='owner_id' and data_type<>'uuid') then
      raise exception 'Canopy revenue migration expects UUID profile, project and request identifiers. Review the live schema before applying.';
     end if;
     if not exists(select 1 from pg_trigger where tgrelid='public.profiles'::regclass and tgname='canopy_prepare_profile_before_insert' and not tgisinternal)
@@ -34,6 +42,9 @@ begin
     where n.nspname='public' and c.relname='projects' and c.relrowsecurity) then
     raise exception 'Row Level Security must already be enabled on public.projects. Review existing policies before applying the Canopy release gate.';
   end if;
+  if to_regprocedure('public.is_admin()') is null then
+    raise exception 'Existing public.is_admin() authorization function is required before applying the Canopy revenue migration.';
+  end if;
 end;
 $$;
 
@@ -43,9 +54,9 @@ create table if not exists public.canopy_billing_orders (
   order_type text not null check (order_type in ('premium_subscription','partner_subscription','esg_report')),
   amount_myr numeric(12,2) not null check (amount_myr >= 0),
   currency text not null default 'MYR' check (currency = 'MYR'),
-  payment_status text not null default 'pending' check (payment_status in ('pending','paid','sandbox_paid','failed','cancelled','overdue')),
+  payment_status text not null default 'pending' check (payment_status in ('pending','sandbox_paid','failed','cancelled','overdue')),
   approval_status text not null default 'pending' check (approval_status in ('pending','approved','rejected')),
-  payment_mode text not null default 'sandbox' check (payment_mode in ('sandbox','provider')),
+  payment_mode text not null default 'sandbox' check (payment_mode = 'sandbox'),
   idempotency_key text not null,
   payment_reference text,
   period_start date,
@@ -91,7 +102,7 @@ create table if not exists public.canopy_transaction_charges (
   transaction_value_myr numeric(14,2),
   sme_fee_rate numeric(6,5) not null default 0.015,
   sme_fee_myr numeric(14,2),
-  payment_status text not null default 'pending' check (payment_status in ('pending','paid','overdue','needs_review')),
+  payment_status text not null default 'pending' check (payment_status in ('pending','overdue','needs_review')),
   approval_status text not null default 'completed',
   approved_at timestamptz,
   completed_at timestamptz not null default now(),
@@ -110,7 +121,7 @@ create table if not exists public.canopy_developer_commissions (
   commission_rate numeric(6,5) not null default 0.015,
   commission_myr numeric(14,2) not null,
   invoice_reference text not null unique,
-  payment_status text not null default 'pending' check (payment_status in ('pending','paid','overdue')),
+  payment_status text not null default 'pending' check (payment_status in ('pending','overdue')),
   created_at timestamptz not null default now(),
   paid_at timestamptz,
   payment_reference text
@@ -121,6 +132,23 @@ create table if not exists public.canopy_project_developers (
   developer_id uuid not null references auth.users(id),
   assigned_by uuid not null references auth.users(id),
   assigned_at timestamptz not null default now()
+);
+
+-- A developer assignment identifies a contact only. A separate active agreement is
+-- required before a 1.5% simulated developer commission can be created.
+create table if not exists public.canopy_developer_commission_arrangements (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references public.projects(id),
+  developer_id uuid not null references auth.users(id),
+  commission_rate numeric(6,5) not null default 0.015 check (commission_rate = 0.015),
+  agreement_reference text not null,
+  active boolean not null default false,
+  starts_at timestamptz not null default now(),
+  ends_at timestamptz,
+  created_by uuid not null references auth.users(id),
+  created_at timestamptz not null default now(),
+  unique(project_id,developer_id),
+  check (ends_at is null or ends_at >= starts_at)
 );
 
 create table if not exists public.canopy_billing_audit (
@@ -205,8 +233,9 @@ as $$
     where s.user_id = auth.uid() and s.plan = p_plan
       and s.status in ('active','active_demo')
       and (s.renewal_at is null or s.renewal_at > now())
-      and (p_plan<>'partner' or exists(select 1 from public.profiles p where p.id=auth.uid()
-        and p.role::text='partner' and p.verification_status::text='verified'))
+      and exists(select 1 from public.profiles p where p.id=auth.uid()
+        and p.verification_status::text='verified'
+        and ((p_plan='premium' and p.role::text='sme') or (p_plan='partner' and p.role::text='partner')))
   );
 $$;
 
@@ -223,7 +252,22 @@ alter table public.canopy_partner_client_consents enable row level security;
 alter table public.canopy_referral_settings enable row level security;
 alter table public.canopy_project_release_rules enable row level security;
 alter table public.canopy_project_developers enable row level security;
+alter table public.canopy_developer_commission_arrangements enable row level security;
 
+drop policy if exists canopy_billing_orders_read on public.canopy_billing_orders;
+drop policy if exists canopy_subscriptions_read on public.canopy_subscriptions;
+drop policy if exists canopy_reports_read on public.canopy_report_requests;
+drop policy if exists canopy_charges_read on public.canopy_transaction_charges;
+drop policy if exists canopy_commissions_read on public.canopy_developer_commissions;
+drop policy if exists canopy_billing_audit_admin_read on public.canopy_billing_audit;
+drop policy if exists canopy_reconciliation_admin_read on public.canopy_reconciliation_alerts;
+drop policy if exists canopy_partner_codes_read on public.canopy_partner_codes;
+drop policy if exists canopy_referrals_read on public.canopy_partner_referrals;
+drop policy if exists canopy_consents_read on public.canopy_partner_client_consents;
+drop policy if exists canopy_referral_settings_read on public.canopy_referral_settings;
+drop policy if exists canopy_release_admin_read on public.canopy_project_release_rules;
+drop policy if exists canopy_project_developers_read on public.canopy_project_developers;
+drop policy if exists canopy_developer_agreements_read on public.canopy_developer_commission_arrangements;
 create policy canopy_billing_orders_read on public.canopy_billing_orders for select to authenticated using (user_id = auth.uid() or public.canopy_is_admin());
 create policy canopy_subscriptions_read on public.canopy_subscriptions for select to authenticated using (user_id = auth.uid() or public.canopy_is_admin());
 create policy canopy_reports_read on public.canopy_report_requests for select to authenticated using (user_id = auth.uid() or public.canopy_is_admin());
@@ -237,19 +281,47 @@ create policy canopy_consents_read on public.canopy_partner_client_consents for 
 create policy canopy_referral_settings_read on public.canopy_referral_settings for select to authenticated using (true);
 create policy canopy_release_admin_read on public.canopy_project_release_rules for select to authenticated using (public.canopy_is_admin());
 create policy canopy_project_developers_read on public.canopy_project_developers for select to authenticated using (developer_id=auth.uid() or public.canopy_is_admin());
+create policy canopy_developer_agreements_read on public.canopy_developer_commission_arrangements for select to authenticated using (developer_id=auth.uid() or public.canopy_is_admin());
 
 grant select on public.canopy_billing_orders, public.canopy_subscriptions, public.canopy_report_requests,
   public.canopy_transaction_charges, public.canopy_developer_commissions, public.canopy_billing_audit,
   public.canopy_reconciliation_alerts, public.canopy_partner_codes, public.canopy_partner_referrals,
   public.canopy_partner_client_consents, public.canopy_referral_settings, public.canopy_project_release_rules,
-  public.canopy_project_developers
+  public.canopy_project_developers, public.canopy_developer_commission_arrangements
   to authenticated;
 revoke insert, update, delete on public.canopy_billing_orders, public.canopy_subscriptions, public.canopy_report_requests,
   public.canopy_transaction_charges, public.canopy_developer_commissions, public.canopy_billing_audit,
   public.canopy_reconciliation_alerts, public.canopy_partner_codes, public.canopy_partner_referrals,
   public.canopy_partner_client_consents, public.canopy_referral_settings, public.canopy_project_release_rules,
-  public.canopy_project_developers
+  public.canopy_project_developers, public.canopy_developer_commission_arrangements
   from anon, authenticated;
+
+-- Do not use the legacy is_admin_or_partner() shortcut for direct table reads.
+-- Migration 003 adds the separate, consent-checked Partner access gate.
+do $$
+declare legacy_policy record;
+begin
+  for legacy_policy in
+    select tablename, policyname
+    from pg_policies
+    where schemaname='public'
+      and tablename in ('profiles','holdings','carbon_requests')
+      and (coalesce(qual,'') ilike '%is_admin_or_partner%'
+        or coalesce(with_check,'') ilike '%is_admin_or_partner%')
+  loop
+    execute format('drop policy if exists %I on public.%I', legacy_policy.policyname, legacy_policy.tablename);
+  end loop;
+end;
+$$;
+drop policy if exists "profiles self read" on public.profiles;
+drop policy if exists "holding owner read" on public.holdings;
+drop policy if exists "request owner read" on public.carbon_requests;
+create policy "profiles self read" on public.profiles for select to authenticated
+  using (id=auth.uid() or public.is_admin());
+create policy "holding owner read" on public.holdings for select to authenticated
+  using (owner_id=auth.uid() or public.is_admin());
+create policy "request owner read" on public.carbon_requests for select to authenticated
+  using (requester_id=auth.uid() or recipient_id=auth.uid() or public.is_admin());
 
 create or replace function public.canopy_create_billing_order(
   p_order_type text,
@@ -270,9 +342,9 @@ begin
   if actor is null then raise exception 'Sign in required.' using errcode = '42501'; end if;
   if length(trim(coalesce(p_idempotency_key,''))) < 12 then raise exception 'A unique checkout key is required.' using errcode = '22023'; end if;
   select p.role::text,p.verification_status::text into actor_role,actor_status from public.profiles p where p.id = actor;
-  if p_order_type = 'premium_subscription' and actor_role = 'sme' then fixed_price := 250;
+  if p_order_type = 'premium_subscription' and actor_role = 'sme' and actor_status='verified' then fixed_price := 250;
   elsif p_order_type = 'partner_subscription' and actor_role = 'partner' and actor_status='verified' then fixed_price := 500;
-  elsif p_order_type = 'esg_report' and actor_role = 'sme' then fixed_price := 500;
+  elsif p_order_type = 'esg_report' and actor_role = 'sme' and actor_status='verified' then fixed_price := 500;
   else raise exception 'This account cannot purchase the requested item.' using errcode = '42501'; end if;
   if p_period_end < p_period_start then raise exception 'Invalid billing/reporting period.' using errcode = '22023'; end if;
 
@@ -351,15 +423,12 @@ as $$
 declare order_row public.canopy_billing_orders; previous text;
 begin
   if not public.canopy_is_admin() then raise exception 'Administrator access required.' using errcode='42501'; end if;
-  if p_status not in ('pending','paid','overdue') or length(trim(coalesce(p_note,'')))<3 then raise exception 'Valid status and audit note are required.' using errcode='22023'; end if;
+  if p_status='paid' then raise exception 'Canopy is a university prototype: provider payments and collected-cash status are disabled.' using errcode='22023'; end if;
+  if p_status not in ('pending','overdue') or length(trim(coalesce(p_note,'')))<3 then raise exception 'Valid simulated billing status and audit note are required.' using errcode='22023'; end if;
   select payment_status into previous from public.canopy_billing_orders where id=p_order_id for update;
   if not found then raise exception 'Billing order not found.' using errcode='P0002'; end if;
   update public.canopy_billing_orders set payment_status=p_status,payment_reference=nullif(trim(p_reference),''),paid_at=case when p_status='paid' then now() else null end
     where id=p_order_id returning * into order_row;
-  if order_row.payment_mode<>'provider' then
-    update public.canopy_billing_orders set payment_status=previous,payment_reference=null where id=p_order_id returning * into order_row;
-    raise exception 'Demo orders cannot be recorded as collected cash.' using errcode='22023';
-  end if;
   insert into public.canopy_billing_audit(actor_id,target_type,target_id,previous_status,new_status,note)
     values(auth.uid(),'billing_order',p_order_id,previous,p_status,trim(p_note));
   if order_row.order_type in ('premium_subscription','partner_subscription') then
@@ -388,7 +457,8 @@ as $$
 declare commission_row public.canopy_developer_commissions; previous text;
 begin
   if not public.canopy_is_admin() then raise exception 'Administrator access required.' using errcode='42501'; end if;
-  if p_status not in ('pending','paid','overdue') or length(trim(coalesce(p_note,'')))<3 then raise exception 'Valid status and audit note are required.' using errcode='22023'; end if;
+  if p_status='paid' then raise exception 'Canopy is a university prototype: developer payments cannot be recorded as collected cash.' using errcode='22023'; end if;
+  if p_status not in ('pending','overdue') or length(trim(coalesce(p_note,'')))<3 then raise exception 'Valid simulated invoice status and audit note are required.' using errcode='22023'; end if;
   select payment_status into previous from public.canopy_developer_commissions where id=p_commission_id for update;
   if not found then raise exception 'Developer invoice not found.' using errcode='P0002'; end if;
   update public.canopy_developer_commissions set payment_status=p_status,payment_reference=nullif(trim(p_reference),''),paid_at=case when p_status='paid' then now() else null end
@@ -406,7 +476,8 @@ as $$
 declare charge_row public.canopy_transaction_charges; previous text;
 begin
   if not public.canopy_is_admin() then raise exception 'Administrator access required.' using errcode='42501'; end if;
-  if p_status not in ('pending','paid','overdue','needs_review') or length(trim(coalesce(p_note,'')))<3 then raise exception 'Valid status and audit note are required.' using errcode='22023'; end if;
+  if p_status='paid' then raise exception 'Canopy is a university prototype: transaction fees cannot be recorded as collected cash.' using errcode='22023'; end if;
+  if p_status not in ('pending','overdue','needs_review') or length(trim(coalesce(p_note,'')))<3 then raise exception 'Valid simulated fee status and audit note are required.' using errcode='22023'; end if;
   select payment_status into previous from public.canopy_transaction_charges where id=p_charge_id for update;
   if not found then raise exception 'Transaction charge not found.' using errcode='P0002'; end if;
   update public.canopy_transaction_charges set payment_status=p_status,payment_reference=nullif(trim(p_reference),''),paid_at=case when p_status='paid' then now() else null end
@@ -527,11 +598,11 @@ begin
   select jsonb_build_object('company_name',p.company_name,'registration_number',p.registration_number,'sector',p.sector,'verification_status',p.verification_status)
     into profile_json from public.profiles p where p.id=p_sme_id;
   select coalesce(jsonb_agg(to_jsonb(h) || jsonb_build_object('project',to_jsonb(pr))),'[]'::jsonb) into holdings_json
-    from public.holdings h left join public.projects pr on pr.id::text=to_jsonb(h)->>'project_id'
-    where coalesce(to_jsonb(h)->>'user_id',to_jsonb(h)->>'profile_id',to_jsonb(h)->>'sme_id',to_jsonb(h)->>'account_id')=p_sme_id::text;
+    from public.holdings h left join public.projects pr on pr.id=h.project_id
+    where h.owner_id=p_sme_id;
   select coalesce(jsonb_agg(to_jsonb(r) || jsonb_build_object('project',to_jsonb(pr))),'[]'::jsonb) into requests_json
-    from public.carbon_requests r left join public.projects pr on pr.id::text=to_jsonb(r)->>'project_id'
-    where coalesce(to_jsonb(r)->>'user_id',to_jsonb(r)->>'profile_id',to_jsonb(r)->>'sme_id',to_jsonb(r)->>'account_id')=p_sme_id::text;
+    from public.carbon_requests r left join public.projects pr on pr.id=r.project_id
+    where r.requester_id=p_sme_id or r.recipient_id=p_sme_id;
   return jsonb_build_object('profile',coalesce(profile_json,'{}'::jsonb),'holdings',coalesce(holdings_json,'[]'::jsonb),'requests',coalesce(requests_json,'[]'::jsonb));
 end;
 $$;
@@ -548,13 +619,13 @@ begin
   select jsonb_build_object('company_name',p.company_name,'registration_number',p.registration_number,'contact_name',p.contact_name,'sector',p.sector)
     into profile_json from public.profiles p where p.id=auth.uid();
   select coalesce(jsonb_agg(to_jsonb(h) || jsonb_build_object('project',to_jsonb(pr))),'[]'::jsonb) into holdings_json
-    from public.holdings h left join public.projects pr on pr.id::text=to_jsonb(h)->>'project_id'
-    where coalesce(to_jsonb(h)->>'user_id',to_jsonb(h)->>'profile_id',to_jsonb(h)->>'sme_id',to_jsonb(h)->>'account_id')=auth.uid()::text;
+    from public.holdings h left join public.projects pr on pr.id=h.project_id
+    where h.owner_id=auth.uid();
   select coalesce(jsonb_agg(to_jsonb(r) || jsonb_build_object('project',to_jsonb(pr))),'[]'::jsonb) into requests_json
-    from public.carbon_requests r left join public.projects pr on pr.id::text=to_jsonb(r)->>'project_id'
-    where coalesce(to_jsonb(r)->>'user_id',to_jsonb(r)->>'profile_id',to_jsonb(r)->>'sme_id',to_jsonb(r)->>'account_id')=auth.uid()::text
-      and nullif(to_jsonb(r)->>'created_at','')::timestamptz >= report_row.period_start::timestamptz
-      and nullif(to_jsonb(r)->>'created_at','')::timestamptz < (report_row.period_end+1)::timestamptz;
+    from public.carbon_requests r left join public.projects pr on pr.id=r.project_id
+    where (r.requester_id=auth.uid() or r.recipient_id=auth.uid())
+      and r.created_at >= report_row.period_start::timestamptz
+      and r.created_at < (report_row.period_end+1)::timestamptz;
   return jsonb_build_object('report',to_jsonb(report_row),'company',coalesce(profile_json,'{}'::jsonb),
     'holdings',coalesce(holdings_json,'[]'::jsonb),'transactions',coalesce(requests_json,'[]'::jsonb),
     'impact_claims_supported',false,'data_note','Only stored Canopy records are included; no emissions or environmental impact estimate is inferred.');
@@ -568,23 +639,41 @@ as $$
 declare streams jsonb; months jsonb;
 begin
   if not public.canopy_is_admin() then raise exception 'Administrator access required.' using errcode='42501'; end if;
-  with actuals as (
-    select 'carbon_transaction_fees'::text stream,paid_at as created_at,coalesce(sme_fee_myr,0) amount from public.canopy_transaction_charges where payment_status='paid'
-    union all select 'premium_subscription',paid_at,amount_myr from public.canopy_billing_orders where order_type='premium_subscription' and payment_status='paid'
-    union all select 'esg_reporting',paid_at,amount_myr from public.canopy_billing_orders where order_type='esg_report' and payment_status='paid'
-    union all select 'developer_commissions',paid_at,commission_myr from public.canopy_developer_commissions where payment_status='paid'
-    union all select 'partner_subscription',paid_at,amount_myr from public.canopy_billing_orders where order_type='partner_subscription' and payment_status='paid'
+  with revenue_actuals(stream_name, recorded_at, amount_myr) as (
+    select 'carbon_transaction_fees'::text, paid_at, coalesce(sme_fee_myr,0) from public.canopy_transaction_charges where payment_status='paid'
+    union all select 'premium_subscription', paid_at, amount_myr from public.canopy_billing_orders where order_type='premium_subscription' and payment_status='paid'
+    union all select 'esg_reporting', paid_at, amount_myr from public.canopy_billing_orders where order_type='esg_report' and payment_status='paid'
+    union all select 'developer_commissions', paid_at, commission_myr from public.canopy_developer_commissions where payment_status='paid'
+    union all select 'partner_subscription', paid_at, amount_myr from public.canopy_billing_orders where order_type='partner_subscription' and payment_status='paid'
   )
-  select coalesce(jsonb_object_agg(stream,amount),'{}'::jsonb) into streams from (select stream,round(sum(amount),2) amount from actuals group by stream) s;
-  with actuals as (
-    select 'carbon_transaction_fees'::text stream,paid_at as created_at,coalesce(sme_fee_myr,0) amount from public.canopy_transaction_charges where payment_status='paid'
-    union all select 'premium_subscription',paid_at,amount_myr from public.canopy_billing_orders where order_type='premium_subscription' and payment_status='paid'
-    union all select 'esg_reporting',paid_at,amount_myr from public.canopy_billing_orders where order_type='esg_report' and payment_status='paid'
-    union all select 'developer_commissions',paid_at,commission_myr from public.canopy_developer_commissions where payment_status='paid'
-    union all select 'partner_subscription',paid_at,amount_myr from public.canopy_billing_orders where order_type='partner_subscription' and payment_status='paid'
+  select coalesce(jsonb_object_agg(stream_summary.stream_name,stream_summary.total_amount_myr),'{}'::jsonb)
+    into streams
+  from (
+    select stream_name, round(sum(amount_myr),2) as total_amount_myr
+    from revenue_actuals
+    group by stream_name
+  ) as stream_summary;
+
+  with revenue_actuals(stream_name, recorded_at, amount_myr) as (
+    select 'carbon_transaction_fees'::text, paid_at, coalesce(sme_fee_myr,0) from public.canopy_transaction_charges where payment_status='paid'
+    union all select 'premium_subscription', paid_at, amount_myr from public.canopy_billing_orders where order_type='premium_subscription' and payment_status='paid'
+    union all select 'esg_reporting', paid_at, amount_myr from public.canopy_billing_orders where order_type='esg_report' and payment_status='paid'
+    union all select 'developer_commissions', paid_at, commission_myr from public.canopy_developer_commissions where payment_status='paid'
+    union all select 'partner_subscription', paid_at, amount_myr from public.canopy_billing_orders where order_type='partner_subscription' and payment_status='paid'
   )
-  select coalesce(jsonb_agg(jsonb_build_object('month',month,'stream',stream,'amount_myr',amount) order by month,stream),'[]'::jsonb)
-    into months from (select date_trunc('month',created_at)::date month,stream,round(sum(amount),2) amount from actuals where created_at>=date_trunc('month',now())-interval '11 months' group by 1,2) m;
+  select coalesce(jsonb_agg(
+      jsonb_build_object('month',monthly_summary.month_start,'stream',monthly_summary.stream_name,'amount_myr',monthly_summary.total_amount_myr)
+      order by monthly_summary.month_start, monthly_summary.stream_name
+    ),'[]'::jsonb)
+    into months
+  from (
+    select date_trunc('month', recorded_at)::date as month_start,
+      stream_name,
+      round(sum(amount_myr),2) as total_amount_myr
+    from revenue_actuals
+    where recorded_at >= date_trunc('month',now()) - interval '11 months'
+    group by date_trunc('month', recorded_at)::date, stream_name
+  ) as monthly_summary;
   return jsonb_build_object('paid_actuals',streams,'monthly',months);
 end;
 $$;
@@ -599,7 +688,8 @@ begin
   if public.canopy_is_admin() then return query select * from public.projects order by created_at desc; return; end if;
   return query select p.* from public.projects p left join public.canopy_project_release_rules r on r.project_id=p.id
     where p.listing_status::text='published'
-      and (r.project_id is null or (is_premium and r.premium_available_at<=now()) or r.free_available_at<=now())
+      and r.project_id is not null
+      and ((is_premium and r.premium_available_at<=now()) or r.free_available_at<=now())
     order by p.created_at desc;
 end;
 $$;
@@ -636,28 +726,76 @@ begin
 end;
 $$;
 
+create or replace function public.canopy_admin_set_developer_commission_arrangement(
+  p_admin_id uuid,p_project_id uuid,p_developer_id uuid,p_commission_rate numeric,
+  p_agreement_reference text,p_active boolean,p_note text
+) returns jsonb language plpgsql security definer
+set search_path = pg_catalog, public, auth
+as $$
+declare arrangement public.canopy_developer_commission_arrangements;
+begin
+  if auth.uid() is distinct from p_admin_id or not public.canopy_is_admin() then
+    raise exception 'Administrator access required.' using errcode='42501';
+  end if;
+  if p_commission_rate <> 0.015 or length(trim(coalesce(p_agreement_reference,''))) < 3
+     or length(trim(coalesce(p_note,''))) < 3 then
+    raise exception 'An explicit agreement reference, audit note and 1.5%% commission rate are required.' using errcode='22023';
+  end if;
+  if not exists(select 1 from public.canopy_project_developers where project_id=p_project_id and developer_id=p_developer_id) then
+    raise exception 'Assign the developer to the project before recording a commission agreement.' using errcode='22023';
+  end if;
+  insert into public.canopy_developer_commission_arrangements(project_id,developer_id,commission_rate,agreement_reference,active,created_by,starts_at,ends_at)
+  values(p_project_id,p_developer_id,0.015,trim(p_agreement_reference),p_active,p_admin_id,now(),null)
+  on conflict(project_id,developer_id) do update set commission_rate=0.015,agreement_reference=excluded.agreement_reference,
+    active=excluded.active,created_by=excluded.created_by,starts_at=now(),ends_at=null
+  returning * into arrangement;
+  insert into public.canopy_billing_audit(actor_id,target_type,target_id,new_status,note)
+  values(p_admin_id,'developer_commission_agreement',arrangement.id,case when arrangement.active then 'active' else 'inactive' end,trim(p_note));
+  return to_jsonb(arrangement);
+end;
+$$;
+
 create or replace function public.canopy_seed_project_release()
 returns trigger language plpgsql security definer
 set search_path = pg_catalog, public
 as $$
 begin
-  if new.listing_status::text='published' and (tg_op='INSERT' or old.listing_status::text<>'published') then
+  if new.listing_status::text<>'published' then
+    return new;
+  end if;
+  if tg_op='INSERT' then
+    insert into public.canopy_project_release_rules(project_id,premium_available_at,free_available_at)
+    values(new.id,now(),now()+interval '48 hours') on conflict(project_id) do nothing;
+  elsif old.listing_status::text<>'published' then
     insert into public.canopy_project_release_rules(project_id,premium_available_at,free_available_at)
     values(new.id,now(),now()+interval '48 hours') on conflict(project_id) do nothing;
   end if;
   return new;
 end;
 $$;
-create trigger canopy_seed_release_after_insert after insert on public.projects for each row execute function public.canopy_seed_project_release();
-create trigger canopy_seed_release_after_listing_update after update of listing_status on public.projects for each row execute function public.canopy_seed_project_release();
+do $$
+begin
+  if not exists(select 1 from pg_trigger where tgrelid='public.projects'::regclass and tgname='canopy_seed_release_after_insert' and not tgisinternal) then
+    create trigger canopy_seed_release_after_insert after insert on public.projects for each row execute function public.canopy_seed_project_release();
+  end if;
+  if not exists(select 1 from pg_trigger where tgrelid='public.projects'::regclass and tgname='canopy_seed_release_after_listing_update' and not tgisinternal) then
+    create trigger canopy_seed_release_after_listing_update after update of listing_status on public.projects for each row execute function public.canopy_seed_project_release();
+  end if;
+end;
+$$;
+
+-- Existing published listings remain available to Free users immediately; only
+-- listings published after this migration receive the 48-hour Premium window.
+insert into public.canopy_project_release_rules(project_id,premium_available_at,free_available_at)
+select id,now(),now() from public.projects where listing_status::text='published'
+on conflict(project_id) do nothing;
 
 create or replace function public.canopy_capture_completed_transaction()
 returns trigger language plpgsql security definer
 set search_path = pg_catalog, public
 as $$
 declare
-  request_data jsonb := to_jsonb(new);
-  project_data jsonb;
+  agreement public.canopy_developer_commission_arrangements;
   owner_id uuid;
   developer uuid;
   project_uuid uuid;
@@ -669,29 +807,29 @@ declare
   payment_state text := 'pending';
 begin
   if lower(new.status::text)<>'completed' or lower(old.status::text)='completed' then return new; end if;
-  project_uuid := nullif(request_data->>'project_id','')::uuid;
-  select to_jsonb(p) into project_data from public.projects p where p.id=project_uuid;
-  quantity := coalesce(nullif(request_data->>'quantity_tco2e','')::numeric,0);
-  kind := lower(coalesce(request_data->>'request_type','unknown'));
-  owner_id := coalesce(nullif(request_data->>'user_id','')::uuid,nullif(request_data->>'profile_id','')::uuid,
-    nullif(request_data->>'sme_id','')::uuid,nullif(request_data->>'account_id','')::uuid);
+  project_uuid := new.project_id;
+  quantity := coalesce(new.quantity_tco2e,0);
+  kind := lower(coalesce(new.request_type::text,'unknown'));
+  owner_id := new.requester_id;
   select d.developer_id into developer from public.canopy_project_developers d where d.project_id=project_uuid;
   if kind not in ('buy','purchase','sell','sale') then return new; end if;
   if kind in ('buy','purchase') then
-    unit_price := nullif(project_data->>'price_myr','')::numeric;
+    select price_myr into unit_price from public.projects where id=project_uuid;
   else
-    unit_price := coalesce(nullif(request_data->>'requested_price_myr','')::numeric,
-      nullif(request_data->>'price_myr','')::numeric,nullif(request_data->>'price','')::numeric);
+    unit_price := new.price_myr;
   end if;
   if quantity<=0 or unit_price is null or owner_id is null then payment_state := 'needs_review'; end if;
   gross := case when unit_price is not null and quantity>0 then round(unit_price*quantity,2) else null end;
   sme_fee := case when gross is not null then round(gross*0.015,2) else null end;
   insert into public.canopy_transaction_charges(request_id,user_id,project_id,developer_id,transaction_type,quantity_tco2e,transaction_value_myr,sme_fee_myr,payment_status,created_at,approved_at,completed_at)
     values(new.id,owner_id,project_uuid,developer,kind,quantity,gross,sme_fee,payment_state,
-      coalesce(nullif(request_data->>'created_at','')::timestamptz,now()),now(),now()) on conflict(request_id) do nothing;
-  if developer is not null and gross is not null and kind in ('buy','purchase') then
-    insert into public.canopy_developer_commissions(request_id,developer_id,project_id,quantity_tco2e,transaction_value_myr,commission_myr,invoice_reference)
-      values(new.id,developer,project_uuid,quantity,gross,round(gross*0.015,2),'CAN-DEV-'||upper(substr(replace(new.id::text,'-',''),1,12)))
+      coalesce(new.created_at,now()),now(),now()) on conflict(request_id) do nothing;
+  select * into agreement from public.canopy_developer_commission_arrangements
+    where project_id=project_uuid and developer_id=developer and active and starts_at<=now()
+      and (ends_at is null or ends_at>=now()) order by created_at desc limit 1;
+  if found and gross is not null and kind in ('buy','purchase') then
+    insert into public.canopy_developer_commissions(request_id,developer_id,project_id,quantity_tco2e,transaction_value_myr,commission_rate,commission_myr,invoice_reference)
+      values(new.id,developer,project_uuid,quantity,gross,agreement.commission_rate,round(gross*agreement.commission_rate,2),'CAN-DEV-'||upper(substr(replace(new.id::text,'-',''),1,12)))
       on conflict(request_id) do nothing;
   end if;
   if payment_state='needs_review' then
@@ -707,8 +845,14 @@ exception when others then
   return new;
 end;
 $$;
-create trigger canopy_capture_transaction_after_complete after update of status on public.carbon_requests
-for each row when (lower(new.status::text)='completed') execute function public.canopy_capture_completed_transaction();
+do $$
+begin
+  if not exists(select 1 from pg_trigger where tgrelid='public.carbon_requests'::regclass and tgname='canopy_capture_transaction_after_complete' and not tgisinternal) then
+    create trigger canopy_capture_transaction_after_complete after update of status on public.carbon_requests
+    for each row when (lower(new.status::text)='completed') execute function public.canopy_capture_completed_transaction();
+  end if;
+end;
+$$;
 
 revoke all on function public.canopy_create_billing_order(text,text,date,date) from public,anon;
 revoke all on function public.canopy_simulate_billing_payment(uuid) from public,anon;
@@ -744,25 +888,21 @@ grant execute on function public.canopy_admin_revenue_dashboard() to authenticat
 grant execute on function public.canopy_list_projects() to authenticated;
 grant execute on function public.canopy_admin_set_project_release(uuid,timestamptz,timestamptz) to authenticated;
 grant execute on function public.canopy_admin_assign_project_developer(uuid,uuid) to authenticated;
+revoke all on function public.canopy_admin_set_developer_commission_arrangement(uuid,uuid,uuid,numeric,text,boolean,text) from public,anon;
+grant execute on function public.canopy_admin_set_developer_commission_arrangement(uuid,uuid,uuid,numeric,text,boolean,text) to authenticated;
 
+drop policy if exists canopy_project_release_access on public.projects;
+drop policy if exists canopy_project_release_gate on public.projects;
 create policy canopy_project_release_access on public.projects as permissive for select to authenticated
 using (
   public.canopy_is_admin()
-  or (listing_status::text='published' and (
-    not exists(select 1 from public.canopy_project_release_rules r where r.project_id=projects.id)
-    or exists(select 1 from public.canopy_project_release_rules r where r.project_id=projects.id and r.free_available_at<=now())
-    or (public.canopy_has_subscription('premium') and exists(
-      select 1 from public.canopy_project_release_rules r where r.project_id=projects.id and r.premium_available_at<=now()))
-  ))
+  or (listing_status::text='published' and exists(select 1 from public.canopy_project_release_rules r where r.project_id=projects.id
+    and (r.free_available_at<=now() or (public.canopy_has_subscription('premium') and r.premium_available_at<=now()))))
 );
 
 create policy canopy_project_release_gate on public.projects as restrictive for select to anon,authenticated
 using (
   public.canopy_is_admin()
-  or (listing_status::text='published' and (
-    not exists(select 1 from public.canopy_project_release_rules r where r.project_id=projects.id)
-    or exists(select 1 from public.canopy_project_release_rules r where r.project_id=projects.id and r.free_available_at<=now())
-    or (public.canopy_has_subscription('premium') and exists(
-      select 1 from public.canopy_project_release_rules r where r.project_id=projects.id and r.premium_available_at<=now()))
-  ))
+  or (listing_status::text='published' and exists(select 1 from public.canopy_project_release_rules r where r.project_id=projects.id
+    and (r.free_available_at<=now() or (public.canopy_has_subscription('premium') and r.premium_available_at<=now()))))
 );
