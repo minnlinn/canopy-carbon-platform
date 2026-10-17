@@ -55,7 +55,10 @@
     const accountStatus = await rpc('canopy_current_account_status');
     if (accountStatus !== 'verified') throw new Error(`Subscription is unavailable while this account is ${accountStatus}. Admin verification is required.`);
     const order = await createCheckout(orderType);
-    const dialog = modal(`<h2>${escapeHtml(title)}</h2><p>${escapeHtml(benefits)}</p><dl class="details"><div><dt>Configured monthly price</dt><dd>${cash(order.amount_myr)}</dd></div><div><dt>Payment status</dt><dd>Sandbox checkout pending</dd></div></dl><p class="fine-print">Demo only — no real payment or carbon-credit purchase. No card or bank details are collected.</p><button class="btn primary" id="confirmSubscription">Confirm demo subscription</button><p id="subscriptionResult" class="feedback-message" aria-live="polite"></p>`);
+    const wallet = await rpc('canopy_demo_wallet_summary');
+    const balance = Number(wallet.balance_myr || 0); const price = Number(order.amount_myr || 0); const shortfall = Math.max(0, price - balance); const enough = balance >= price;
+    const dialog = modal(`<h2>${escapeHtml(title)}</h2><p>${escapeHtml(benefits)}</p><dl class="details"><div><dt>Configured monthly price</dt><dd>${cash(price)}</dd></div><div><dt>Current Demo RM Wallet</dt><dd>${cash(balance)}</dd></div><div><dt>Remaining after payment</dt><dd>${cash(Math.max(0,balance-price))}</dd></div><div><dt>Payment status</dt><dd>Sandbox checkout pending</dd></div></dl><p class="fine-print">Demo only — no real payment or carbon-credit purchase. No card or bank details are collected.</p><button class="btn secondary" id="openWallet" type="button">Open Demo RM Wallet</button> <button class="btn primary" id="confirmSubscription" ${enough?'':'disabled'}>Confirm demo subscription</button><p id="subscriptionResult" class="feedback-message ${enough?'':'feedback-error'}" aria-live="polite">${enough?'':`Insufficient demo wallet balance. Please top up RM ${shortfall.toFixed(2)} to subscribe.`}</p>`);
+    dialog.querySelector('#openWallet').onclick=()=>{dialog.close();context.openWallet?.();};
     const button = dialog.querySelector('#confirmSubscription');
     button.onclick = async () => {
       button.disabled = true; button.textContent = 'Confirming…';
