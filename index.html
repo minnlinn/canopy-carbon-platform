@@ -9,12 +9,14 @@
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="password-visibility.css">
   <link rel="stylesheet" href="revenue.css">
+  <link rel="stylesheet" href="canopy-projects.css">
   <script src="config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="pwa.js" defer></script>
   <script src="password-visibility.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" defer></script>
   <script src="revenue-platform.js" defer></script>
+  <script src="canopy-projects.js" defer></script>
   <script src="app.js" defer></script>
 </head><body class="canopy-live">
   <main id="authShell" class="auth-shell">
@@ -26,7 +28,7 @@
     <section class="auth-card">
       <div id="setupMessage" class="setup-message" hidden></div>
       <div id="authForms">
-        <div class="auth-tabs"><button class="active" data-auth-tab="login">Sign in</button><button data-auth-tab="register">Register SME</button></div>
+        <div class="auth-tabs"><button class="active" data-auth-tab="login">Sign in</button><button data-auth-tab="register">Register SME</button><button data-auth-tab="partner">Register Partner</button></div>
         <form id="loginForm" class="auth-form"><h2>Welcome back</h2><p>Use the account issued for your organisation.</p>
           <label>Email<input name="email" type="email" autocomplete="email" required></label>
           <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
@@ -42,6 +44,17 @@
           <label>Partner referral code (optional)<input name="referral_code" autocomplete="off"></label>
           <label>Password<input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
           <button class="btn primary wide" type="submit">Create account</button>
+        </form>
+        <form id="partnerRegisterForm" class="auth-form" hidden><h2>Register as a Partner</h2><p>Partner accounts are reviewed before Portal access is available.</p>
+          <label>Organisation name<input name="company_name" required minlength="2" autocomplete="organization"></label>
+          <label>Business registration number<input name="registration_number" required></label>
+          <label>Organisation type<input name="organization_type" required></label>
+          <label>Contact person<input name="contact_name" required autocomplete="name"></label>
+          <label>Business email<input name="email" type="email" autocomplete="email" required></label>
+          <label>Phone number<input name="phone" type="tel" autocomplete="tel" required></label>
+          <label>Business activities<textarea name="business_description" required minlength="10"></textarea></label>
+          <label>Password<input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+          <button class="btn primary wide" type="submit">Submit Partner registration</button>
         </form>
         <p id="authFeedback" class="form-feedback" aria-live="polite"></p>
       </div>

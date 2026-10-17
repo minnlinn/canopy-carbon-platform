@@ -136,6 +136,19 @@ Deno.serve(async request => {
     return response({ ...data, notification: 'queued' });
   }
 
+  if (payload.action === 'review-registration'
+      && typeof payload.profileId === 'string'
+      && ['approve', 'reject'].includes(String(payload.decision))) {
+    const { data, error } = await adminDb.rpc('canopy_admin_review_registration', {
+      p_admin_id: user.id,
+      p_user_id: payload.profileId,
+      p_decision: payload.decision,
+      p_note: typeof payload.reviewNote === 'string' ? payload.reviewNote.slice(0, 1000) : '',
+    });
+    if (error) return response({ error: error.message }, 409);
+    return response({ ...data, notification: payload.decision === 'approve' ? 'queued-if-configured' : 'not-sent' });
+  }
+
   if (payload.action === 'retry' && typeof payload.notificationId === 'string') {
     const { data: reset, error } = await adminDb.from('canopy_email_notifications')
       .update({ delivery_status: 'pending', last_error: null })

@@ -161,6 +161,7 @@ tables. Apply migrations in filename order (after linking the CLI to the correct
 project):
    supabase/migrations/202610170001_canopy_account_notifications.sql
    supabase/migrations/202610170002_five_stream_revenue.sql
+   supabase/migrations/202610170003_demo_projects_and_partner_registration.sql
 You may run the SQL files in Supabase SQL Editor in that order instead. Do not
 re-run migration 001 if it was already applied manually; check Supabase
 migration history first. Stop if the preflight check fails; compare the live
@@ -175,9 +176,47 @@ under their current listing rules. SME referral codes are optional at signup;
 Partner client holdings and transactions are returned only after the SME grants
 consent. Referral rewards start disabled and require an Admin-configured rate.
 
-When deploying, ensure Vercel serves revenue.css and revenue-platform.js and
-wait for the Canopy PWA shell v4 update. PDF export requires the jsPDF CDN while
-online; the rest of the workspace shell is cached for offline launch.
+When deploying, ensure Vercel serves revenue.css, revenue-platform.js,
+canopy-projects.css and canopy-projects.js and wait for the Canopy PWA shell v8
+update. PDF export requires the jsPDF CDN while online; the rest of the
+workspace shell is cached for offline launch.
+
+REAL MALAYSIAN PROJECT REFERENCES (DEMO ONLY)
+Migration 202610170003_demo_projects_and_partner_registration.sql adds a
+separate canopy_demo_projects catalog and seeds the four public Verra project
+references (VCS 2609, 672, 4279 and 5542) with ON CONFLICT DO NOTHING. Project
+facts include public source URLs. The catalog starts with no simulated price,
+zero simulated inventory and demo trading disabled. It makes no claim that
+Canopy owns credits, has acquired inventory, has a developer relationship, or
+is authorized by BCX. The old projects, holdings and carbon_requests rows are
+not rewritten. New demo purchases use separate demo request and entitlement
+ledger tables and never enter collected-revenue calculations.
+
+Marketplace photos are generic representative Unsplash images, with visible
+captions stating they are not photographs of the named projects. They are not
+used as evidence of project characteristics. All four cards are marked
+“Demonstration Listings — No Real Carbon Credits Sold”. Admin changes to
+catalog facts and simulated price/inventory/trading settings use audited RPCs.
+
+PARTNER SIGNUP AND REVIEW (MIGRATION 003)
+The Partner signup form sends only an allowlisted account type and application
+fields. A database trigger assigns either SME or Partner and pending status;
+Admin is not a public option. Admin review/rejection is authenticated by the
+existing account-workflow Edge Function and recorded in a new audit table.
+Rejected accounts remain non-verified; their rejection state is stored in the
+application record. Apply migrations 001, 002 and 003 in order only after
+checking migration history and reviewing the live schema/policies. Migration
+003 stops at preflight if required enums, Admin helper, subscriptions or Partner
+consent tables are missing. It adds restrictive consent policies because the
+existing policies shown in the schema export allow partners broad holdings and
+request reads; review those policies and test the new gates before production.
+
+The checked-in Supabase key previously returned HTTP 401, so none of these SQL
+migrations has been applied or tested against the live database. Run them in
+SQL Editor only after reviewing the complete migration and confirming the
+preflight requirements. No BCX purchase, external registry retirement, or
+real-credit transfer is implemented; all newly added marketplace trading is
+simulated and must be enabled/configured by an Admin.
 
 PASSWORD RECOVERY AND SUPABASE AUTH
 The recovery email redirects to:
