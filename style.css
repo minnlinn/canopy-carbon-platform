@@ -119,3 +119,20 @@ body{font-size:16px}.sidebar{overflow-y:auto}.workspace{margin:24px 0 17px}.work
   background: #fde5e1;
   color: #a23b32;
 }
+/* Keep Admin Account Verification actions on one line */
+.canopy-live #smeTable th:last-child,
+.canopy-live #smeTable td:last-child {
+  min-width: 260px;
+  white-space: nowrap;
+}
+
+.canopy-live #smeTable td:last-child button,
+.canopy-live #smeTable td:last-child .account-action-label {
+  display: inline-flex !important;
+  vertical-align: middle;
+  margin: 0 6px 0 0 !important;
+  min-width: 105px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+}
