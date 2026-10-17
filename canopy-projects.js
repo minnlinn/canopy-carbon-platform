@@ -19,6 +19,13 @@
     if (error) throw error;
     return data;
   }
+  function modal(html) {
+    const dialog = document.querySelector('#actionDialog');
+    document.querySelector('#dialogBody').innerHTML = html;
+    dialog.showModal();
+    dialog.querySelector('.close').onclick = () => dialog.close();
+    return dialog;
+  }
   function errorMessage(error) {
     const message = $('#demoProjectMessage');
     if (message) { message.textContent = error?.message || 'Request failed.'; message.hidden = false; }
@@ -75,12 +82,38 @@
         event.preventDefault();
         const button = form.querySelector('button[type="submit"]');
         button.disabled = true;
-        try {
-          const request = await rpc('canopy_request_demo_purchase', { p_project_id: project.id, p_quantity: Number(input.value) });
-          context.toast(`Demo purchase request submitted for ${Number(request.quantity_tco2e).toFixed(2)} tCO₂e. Admin review required; no payment or real credits transferred.`);
-          await mount('market', context);
-        } catch (error) { button.disabled = false; errorMessage(error); }
+        try { await openPurchaseConfirmation(project, Number(input.value)); }
+        catch (error) { errorMessage(error); }
+        finally { button.disabled = false; }
       });
+    });
+  }
+
+  async function openPurchaseConfirmation(project, initialQuantity) {
+    const wallet = await rpc('canopy_demo_wallet_summary');
+    const dialog = modal(`<h2>Confirm demo purchase</h2><p><strong>${escapeHtml(project.project_name)}</strong></p><p class="fine-print">Demo only — no real payment or carbon-credit purchase. Admin review is required before a simulated allocation appears in your holdings.</p><form id="demoPurchaseConfirm" class="dialog-form"><label>Quantity (tCO₂e)<input name="quantity" type="number" min="0.01" step="0.01" value="${Number(initialQuantity).toFixed(2)}" required></label><dl class="details"><div><dt>Simulated unit price</dt><dd>${cash(project.simulated_price_myr)} / tCO₂e</dd></div><div><dt>Available Demo RM Wallet balance</dt><dd id="walletBalance">${cash(wallet.balance_myr)}</dd></div><div><dt>Credit value</dt><dd id="confirmCreditValue"></dd></div><div><dt>Platform fee (1.5%)</dt><dd id="confirmFee"></dd></div><div><dt>Total</dt><dd id="confirmTotal"></dd></div></dl><button class="btn primary" type="submit">Confirm Demo Purchase</button><p id="demoPurchaseResult" class="form-error" aria-live="polite"></p></form>`);
+    const form = dialog.querySelector('#demoPurchaseConfirm');
+    const input = form.elements.quantity;
+    const submit = form.querySelector('button[type="submit"]');
+    const result = dialog.querySelector('#demoPurchaseResult');
+    const updateQuote = () => {
+      const quantity = Number(input.value || 0); const credit = Math.round(quantity * Number(project.simulated_price_myr) * 100) / 100; const fee = Math.round(credit * 0.015 * 100) / 100; const total = credit + fee;
+      dialog.querySelector('#confirmCreditValue').textContent = cash(credit); dialog.querySelector('#confirmFee').textContent = cash(fee); dialog.querySelector('#confirmTotal').textContent = cash(total);
+      const valid = quantity >= 0.01 && Math.round(quantity * 100) === quantity * 100;
+      const enough = Number(wallet.balance_myr) >= total;
+      submit.disabled = !valid || !enough;
+      result.textContent = !valid ? 'Use at least 0.01 tCO₂e in 0.01 increments.' : !enough ? 'Insufficient Demo RM Wallet balance. Open Demo RM Wallet to add demo funds.' : '';
+    };
+    input.addEventListener('input', updateQuote); updateQuote();
+    form.addEventListener('submit', async event => {
+      event.preventDefault(); if (submit.disabled) return; submit.disabled = true; submit.textContent = 'Submitting…'; result.textContent = '';
+      try {
+        const request = await rpc('canopy_request_demo_purchase', { p_project_id: project.id, p_quantity: Number(input.value) });
+        result.textContent = `Request submitted: ${Number(request.quantity_tco2e).toFixed(2)} tCO₂e is pending Admin review. Demo funds are reserved.`;
+        submit.textContent = 'Submitted';
+        context.toast('Demo purchase submitted and awaiting Admin review.');
+        await mount('market', context);
+      } catch (error) { submit.disabled = false; submit.textContent = 'Confirm Demo Purchase'; result.textContent = error?.message || 'Could not submit this demo purchase.'; }
     });
   }
 
@@ -157,6 +190,18 @@
     }));
   }
 
+  async function holdingsView() {
+    const [ledger, catalogue] = await Promise.all([
+      query('canopy_demo_entitlement_ledger', table => table.select('project_id,delta_tco2e,created_at').order('created_at', { ascending: false })),
+      query('canopy_demo_projects', table => table.select('id,project_name,registry_name,registry_project_id').order('project_name'))
+    ]);
+    const projectNames = new Map(catalogue.map(project => [project.id, project]));
+    const balances = new Map();
+    ledger.forEach(entry => balances.set(entry.project_id, (balances.get(entry.project_id) || 0) + Number(entry.delta_tco2e || 0)));
+    const rows = [...balances.entries()].filter(([, quantity]) => quantity > 0.00001);
+    $('#demoProjectCatalog').innerHTML = `<div class="page-heading"><div><span class="eyebrow">SIMULATED PORTFOLIO</span><h1>My demo carbon holdings</h1><p>Approved demo allocations only. These are not real carbon credits, registry balances, certificates, or ownership records.</p></div></div>${demoBadge}${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Project</th><th>Registry reference</th><th>Demo quantity</th></tr></thead><tbody>${rows.map(([projectId, quantity]) => { const project = projectNames.get(projectId); return `<tr><td>${escapeHtml(project?.project_name || projectId)}</td><td>${escapeHtml(project ? `${project.registry_name} ${project.registry_project_id}` : '—')}</td><td>${quantity.toFixed(2)} tCO₂e</td></tr>`; }).join('')}</tbody></table></div>` : '<div class="empty"><h3>No approved demo allocations yet</h3><p>Top up your Demo RM Wallet, submit a simulated purchase request, and wait for Admin review.</p></div>'}`;
+  }
+
   async function mount(view, values) {
     context = { ...values, view };
     try {
@@ -165,6 +210,8 @@
         renderMarket();
       } else if (view === 'projects') {
         await adminView();
+      } else if (view === 'holdings') {
+        await holdingsView();
       }
     } catch (error) {
       errorMessage(error);

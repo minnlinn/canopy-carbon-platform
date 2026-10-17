@@ -56,18 +56,18 @@ function bindAuth(){
     if(error){ $('#authFeedback').textContent=error.message==='Failed to fetch' ? 'Cannot reach the configured Supabase Auth server. Check the Supabase project URL and network connection, then retry.' : error.message; return; } await enterApp();
   });
   $('#registerForm').addEventListener('submit', async event=>{
-    event.preventDefault(); const form=new FormData(event.currentTarget); $('#authFeedback').textContent='Creating your account…';
+    event.preventDefault(); const submitter=event.currentTarget.querySelector('[type="submit"]'); if(submitter?.disabled)return; if(submitter)submitter.disabled=true; const form=new FormData(event.currentTarget); $('#authFeedback').textContent='Creating your account…';
     const metadata={canopy_account_type:'sme',company_name:form.get('company_name'),registration_number:form.get('registration_number'),contact_name:form.get('contact_name'),sector:form.get('sector'),referral_code:form.get('referral_code')||null};
-    const {error}=await db.auth.signUp({email:form.get('email'),password:form.get('password'),options:{data:metadata}});
-    if(error){ $('#authFeedback').textContent=error.message; return; }
-    event.currentTarget.reset(); $('#authFeedback').textContent='Account submitted. Check your email for address-confirmation instructions if enabled. Canopy will review your account separately before verification.';
+    const {data,error}=await db.auth.signUp({email:form.get('email'),password:form.get('password'),options:{data:metadata}});
+    if(error){ $('#authFeedback').textContent=error.message; if(submitter)submitter.disabled=false; return; }
+    const emailNote=data.session?'':' Confirm your email if Supabase requires it.'; event.currentTarget.reset(); $('#authFeedback').textContent=`Account created successfully! Your registration is pending Admin verification.${emailNote}`; window.alert(`Account created successfully! Your registration is pending Admin verification.${emailNote}`); if(submitter)submitter.disabled=false;
   });
   $('#partnerRegisterForm').addEventListener('submit',async event=>{
-    event.preventDefault();const form=event.currentTarget;const values=new FormData(form);const feedback=$('#authFeedback');feedback.textContent='Submitting Partner registration…';
+    event.preventDefault();const form=event.currentTarget;const submitter=form.querySelector('[type="submit"]');if(submitter?.disabled)return;if(submitter)submitter.disabled=true;const values=new FormData(form);const feedback=$('#authFeedback');feedback.textContent='Submitting Partner registration…';
     const metadata={canopy_account_type:'partner',company_name:values.get('company_name'),registration_number:values.get('registration_number'),organization_type:values.get('organization_type'),contact_name:values.get('contact_name'),phone:values.get('phone'),business_description:values.get('business_description')};
-    const {error}=await db.auth.signUp({email:values.get('email'),password:values.get('password'),options:{data:metadata}});
-    if(error){feedback.textContent=error.message;return;}
-    form.reset();feedback.textContent='Partner registration submitted and awaiting Admin verification. Check your email for address confirmation if enabled. Partner Portal access also requires an active subscription.';
+    const {data,error}=await db.auth.signUp({email:values.get('email'),password:values.get('password'),options:{data:metadata}});
+    if(error){feedback.textContent=error.message;if(submitter)submitter.disabled=false;return;}
+    const emailNote=data.session?'':' Confirm your email if Supabase requires it.';form.reset();feedback.textContent=`Account created successfully! Your registration is pending Admin verification.${emailNote}`;window.alert(`Account created successfully! Your registration is pending Admin verification.${emailNote}`);if(submitter)submitter.disabled=false;
   });
 }
 
@@ -207,5 +207,16 @@ async function loadSMEs(filter='all'){
     if(actionError){button.disabled=false;return fail(actionError);}
     toast(`Account ${({approve:'approved',reject:'rejected',suspend:'suspended',reactivate:'reactivated'})[action]} and audit recorded.`); await loadSMEs(filter);
   });
+}
+function renderNavigation(){
+  const base=profile?.role==='admin'?[['queue','Transaction approvals'],['smes','Account verification'],['projects','Projects'],['admin-subscriptions','Subscription management'],['developer-billing','Developer billing'],['revenue','Revenue dashboard'],['reports','Platform activity']]:profile?.role==='partner'?[['partner','Partner dashboard'],['partner-projects','Carbon projects'],['partner-reports','Client reports']]:profile?.role==='sme'?[['market','Marketplace'],['wallet','Demo RM Wallet'],['holdings','My holdings'],['requests','My requests'],['reports','Carbon & ESG reports'],['premium','Premium'],['partner-access','Partner access'],['profile','Company profile']]:[];
+  $('#navigation').innerHTML=base.map(([id,label])=>`<button class="nav-item ${id===currentView?'active':''}" data-view="${id}">${label}</button>`).join('');
+  $$('[data-view]').forEach(button=>button.onclick=()=>{currentView=button.dataset.view;renderNavigation();render();});
+}
+function render(){
+  $('#crumb').textContent=$(`[data-view="${currentView}"]`)?.textContent||'Workspace'; const projectCatalogueView=currentView==='market'||(currentView==='projects'&&isAdmin())||(currentView==='holdings'&&profile?.role==='sme');
+  if(window.CanopyProjects&&projectCatalogueView){$('#content').innerHTML=currentView==='market'?`<div id="demoProjectCatalog"></div><section class="revenue-section legacy-project-list"><h2>Other Canopy sample projects</h2><p>Illustrative sample records only; they do not represent current registry inventory.</p>${market()}</section>`:'<div id="demoProjectCatalog"></div>';if(currentView==='market')bindView();window.CanopyProjects.mount(currentView,{db,profile,projects,holdings,requests,toast,refresh});return;}
+  const revenueViews=['wallet','premium','revenue','developer-billing','admin-subscriptions','partner','partner-projects','partner-reports','partner-access']; if(window.CanopyRevenue&&(revenueViews.includes(currentView)||(currentView==='reports'&&profile?.role!=='admin'))){$('#content').innerHTML='<div class="revenue-loading">Loading account data…</div>';window.CanopyRevenue.mount(currentView,{db,profile,projects,holdings,requests,toast,refresh});return;}
+  const views={market:market,holdings:holdingList,requests:requestList,profile:companyProfile,queue:queue,projects:projectAdmin,smes:smeAdmin,reports:reports};const view=views[currentView];if(!view){$('#content').innerHTML=empty('Your account role does not have a dashboard configured.');return;}$('#content').innerHTML=view();bindView();
 }
 start().catch(fail);

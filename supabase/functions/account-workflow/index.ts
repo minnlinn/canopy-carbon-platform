@@ -79,13 +79,14 @@ Deno.serve(async request => {
       adminDb.from('canopy_account_applications').select('*').order('submitted_at', { ascending: false }),
       adminDb.auth.admin.listUsers({ page: 1, perPage: 1000 }),
       adminDb.rpc('canopy_admin_account_statuses'),
-      adminDb.from('canopy_account_access_audit').select('user_id,admin_id,previous_status,new_status,reason,created_at').order('created_at', { ascending: false }).limit(1000)
+      adminDb.from('canopy_account_access_audit').select('id,user_id,admin_id,previous_status,new_status,reason,created_at').order('created_at', { ascending: false }).order('id', { ascending: false }).limit(1000)
     ]);
     if (profilesError || applicationsError || usersResult.error || statusesResult.error || auditError) return response(request, { error: profilesError?.message || applicationsError?.message || usersResult.error?.message || statusesResult.error?.message || auditError?.message || 'Could not load account records.' }, 400);
     const emailById = new Map((usersResult.data.users || []).map(item => [item.id, item.email || '']));
     const applicationById = new Map((applications || []).map(item => [item.user_id, item]));
     const statusById = new Map((statusesResult.data || []).map((item: { user_id: string; effective_status: string }) => [item.user_id, item.effective_status]));
-    const latestAuditById = new Map((auditRows || []).map(item => [item.user_id, item]));
+    const latestAuditById = new Map<string, Record<string, unknown>>();
+    for (const audit of auditRows || []) if (!latestAuditById.has(audit.user_id)) latestAuditById.set(audit.user_id, audit);
     return response(request, { data: (profiles || []).map(item => ({ ...item, email: emailById.get(item.id) || '—', application: applicationById.get(item.id) || null, audit: latestAuditById.get(item.id) || null, effective_status: statusById.get(item.id) || 'pending' })) });
   }
   const action = payload.action === 'review-registration' ? payload.decision : payload.changeAction;

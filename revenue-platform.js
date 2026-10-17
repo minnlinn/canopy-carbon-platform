@@ -7,6 +7,13 @@
   let context;
 
   function content(html) { document.querySelector('#content').innerHTML = html; }
+  function modal(html) {
+    const dialog = document.querySelector('#actionDialog');
+    document.querySelector('#dialogBody').innerHTML = html;
+    dialog.showModal();
+    dialog.querySelector('.close').onclick = () => dialog.close();
+    return dialog;
+  }
   function status(value) { return `<span class="status ${escapeHtml(String(value || 'pending').toLowerCase().replace(/[^a-z0-9-]/g, '-'))}">${escapeHtml(value || 'Pending')}</span>`; }
   function showError(error) { context.toast(error?.message || 'Could not load this section.'); }
   async function query(table, builder) {
@@ -37,13 +44,28 @@
       p_period_end: end
     });
     context.pendingOrder = order;
-    context.toast('Sandbox checkout created. No payment has been taken.');
-    await mount(context.view, context);
+    return order;
   }
   async function completeDemo(orderId) {
     await rpc('canopy_simulate_billing_payment', { p_order_id: orderId });
     context.toast('Sandbox flow complete. This is not collected revenue.');
     await context.refresh();
+  }
+  async function startSubscription(orderType, title, benefits) {
+    const accountStatus = await rpc('canopy_current_account_status');
+    if (accountStatus !== 'verified') throw new Error(`Subscription is unavailable while this account is ${accountStatus}. Admin verification is required.`);
+    const order = await createCheckout(orderType);
+    const dialog = modal(`<h2>${escapeHtml(title)}</h2><p>${escapeHtml(benefits)}</p><dl class="details"><div><dt>Configured monthly price</dt><dd>${cash(order.amount_myr)}</dd></div><div><dt>Payment status</dt><dd>Sandbox checkout pending</dd></div></dl><p class="fine-print">Demo only — no real payment or carbon-credit purchase. No card or bank details are collected.</p><button class="btn primary" id="confirmSubscription">Confirm demo subscription</button><p id="subscriptionResult" class="form-error" aria-live="polite"></p>`);
+    const button = dialog.querySelector('#confirmSubscription');
+    button.onclick = async () => {
+      button.disabled = true; button.textContent = 'Confirming…';
+      try {
+        await completeDemo(order.id);
+        dialog.querySelector('#subscriptionResult').textContent = 'Demo subscription confirmed. Your status and billing history are updating.';
+        button.textContent = 'Confirmed';
+        await context.refresh();
+      } catch (error) { button.disabled = false; button.textContent = 'Confirm demo subscription'; dialog.querySelector('#subscriptionResult').textContent = error?.message || 'Could not confirm the demo subscription.'; }
+    };
   }
   async function cancel(plan) {
     await rpc('canopy_cancel_subscription', { p_plan: plan });
@@ -61,7 +83,9 @@
     }));
     document.querySelectorAll('[data-subscribe]').forEach(button => button.addEventListener('click', async () => {
       button.disabled = true;
-      try { await createCheckout(button.dataset.subscribe); } catch (error) { button.disabled = false; showError(error); }
+      const partner = button.dataset.subscribe === 'partner_subscription';
+      try { await startSubscription(button.dataset.subscribe, partner ? 'Partner Portal subscription' : 'Premium subscription', partner ? 'Referral management, authorized client data and reporting tools.' : 'Early eligible project access and advanced portfolio tools.'); }
+      catch (error) { button.disabled = false; showError(error); }
     }));
     document.querySelectorAll('[data-cancel-plan]').forEach(button => button.addEventListener('click', async () => {
       if (!confirm('Cancel this subscription now? Access will end immediately.')) return;
@@ -337,6 +361,13 @@
     }));
   }
 
+  async function walletView() {
+    const wallet = await rpc('canopy_demo_wallet_summary');
+    const transactions = wallet.transactions || [];
+    content(`<div class="page-heading"><div><span class="eyebrow">SIMULATED FUNDS</span><h1>Demo RM Wallet</h1><p>Demo only — no real money. Wallet funds support simulated Canopy purchase requests only.</p></div></div><div class="metric-grid"><article><span>Demo balance</span><strong>${cash(wallet.balance_myr)}</strong></article></div><section class="revenue-section"><h2>Top up demo balance</h2><form id="walletTopUpForm" class="revenue-inline-form"><label>Amount (MYR)<input name="amount" type="number" min="1" step="0.01" required></label><button class="btn primary" type="submit">Add demo funds</button></form></section><section class="revenue-section"><h2>Wallet transactions</h2>${transactions.length?`<div class="table-wrap"><table><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Note</th></tr></thead><tbody>${transactions.map(row=>`<tr><td>${date(row.created_at)}</td><td>${escapeHtml(row.transaction_type)}</td><td>${cash(row.amount_myr)}</td><td>${escapeHtml(row.note||'—')}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No demo wallet transactions yet.</p>'}</section>`);
+    document.querySelector('#walletTopUpForm').addEventListener('submit', async event => { event.preventDefault(); const button=event.submitter; if(button)button.disabled=true; try { await rpc('canopy_demo_wallet_top_up',{p_amount_myr:Number(new FormData(event.currentTarget).get('amount')),p_idempotency_key:crypto.randomUUID()}); context.toast('Demo wallet topped up. No real money was received.'); await mount('wallet',context); } catch(error) { if(button)button.disabled=false; showError(error); } });
+  }
+
   async function mount(view, values) {
     context = { ...values, view };
     try {
@@ -344,6 +375,7 @@
         content(`<div class="page-heading"><div><span class="eyebrow">PARTNER PORTAL</span><h1>Verification required</h1><p>Your Partner application is ${escapeHtml(context.profile?.verification_status || 'pending')}. An Admin must verify the organisation before Partner Portal or subscription features can be used.</p></div></div><section class="revenue-locked"><h2>Partner access is unavailable</h2><p>You can sign out while the application is being reviewed. No subscription, referral, client-data, project-information, or reporting action is available until verification is complete.</p></section>`);
         return;
       }
+      if (view === 'wallet') return await walletView();
       if (view === 'premium') return await premiumView();
       if (view === 'reports') return await reportsView();
       if (view === 'partner') return await partnerView();
