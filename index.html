@@ -7,13 +7,18 @@
   <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="password-visibility.css">
+  <link rel="stylesheet" href="revenue.css">
   <script src="config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="pwa.js" defer></script>
+  <script src="password-visibility.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" defer></script>
+  <script src="revenue-platform.js" defer></script>
   <script src="app.js" defer></script>
 </head><body class="canopy-live">
   <main id="authShell" class="auth-shell">
-    <section class="auth-brand"><a class="brand" href="./"><span class="mark">c</span>canopy<span class="brand-dot">.</span></a>
+    <section class="auth-brand"><a class="brand" href="./"><span class="mark">c</span>canopy</a>
       <p class="eyebrow">BCX-BACKED WORKFLOW</p><h1>Carbon assets made clear for growing businesses.</h1>
       <p>Browse verified projects, hold fractional credits, and submit carbon transactions for administrator review.</p>
       <p class="auth-note">New SME accounts need verification before they can submit transactions.</p>
@@ -34,6 +39,7 @@
           <label>Contact name<input name="contact_name" required></label>
           <label>Business sector<input name="sector"></label>
           <label>Work email<input name="email" type="email" autocomplete="email" required></label>
+          <label>Partner referral code (optional)<input name="referral_code" autocomplete="off"></label>
           <label>Password<input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
           <button class="btn primary wide" type="submit">Create account</button>
         </form>
@@ -43,7 +49,7 @@
     </section>
   </main>
   <div id="appShell" hidden>
-    <aside class="sidebar"><a class="brand" href="#market"><span class="mark">c</span>canopy<span class="brand-dot">.</span></a>
+    <aside class="sidebar"><a class="brand" href="#market"><span class="mark">c</span>canopy</a>
       <div class="workspace"><span class="avatar" id="avatar">C</span><div><strong id="workspaceName">Canopy</strong><small id="workspaceRole"></small></div></div>
       <p class="nav-label" id="navLabel">SME WORKSPACE</p><nav id="navigation" aria-label="Main navigation"></nav>
       <div class="sidebar-note"><span class="small-label">EXECUTION ROUTE</span><h3>Admin managed, BCX-backed.</h3><p>Transaction requests are reviewed before settlement.</p><span class="status pending">Request workflow</span></div>

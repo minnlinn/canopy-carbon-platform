@@ -1,12 +1,16 @@
 'use strict';
 
-const CACHE_NAME = 'canopy-shell-v2';
+const CACHE_NAME = 'canopy-shell-v5';
 const SHELL_FILES = [
   './',
   './index.html',
   './qr.html',
   './reset-password.html',
   './style.css',
+  './password-visibility.css',
+  './password-visibility.js',
+  './revenue.css',
+  './revenue-platform.js',
   './app.js',
   './reset-password.js',
   './pwa.js',
