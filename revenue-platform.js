@@ -16,7 +16,7 @@
   }
   function status(value) { return `<span class="status ${escapeHtml(String(value || 'pending').toLowerCase().replace(/[^a-z0-9-]/g, '-'))}">${escapeHtml(value || 'Pending')}</span>`; }
   function showError(error) { context.toast(error?.message || 'Could not load this section.', 'error'); }
-  function walletTypeLabel(row) { if (row.transaction_type === 'billing_payment') return /esg|report/i.test(row.note || '') ? 'ESG report payment' : 'Subscription payment'; return ({ top_up: 'Demo top-up', purchase_reserve: 'Purchase reservation', purchase_refund: 'Purchase refund' })[row.transaction_type] || row.transaction_type; }
+  function walletTypeLabel(row) { if (row.transaction_type === 'billing_payment') return /esg|report/i.test(row.note || '') ? 'ESG report payment' : 'Subscription payment'; return ({ top_up: 'Demo top-up', purchase_reserve: 'Purchase reservation', purchase_refund: 'Purchase refund', trade_reserve: 'SME trade reservation', trade_refund: 'SME trade refund', trade_sale_proceeds: 'SME trade sale proceeds' })[row.transaction_type] || row.transaction_type; }
   async function query(table, builder) {
     const result = await builder(context.db.from(table));
     if (result.error) throw result.error;
