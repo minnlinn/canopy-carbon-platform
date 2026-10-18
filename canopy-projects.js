@@ -6,6 +6,7 @@
   const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
   const cash = value => new Intl.NumberFormat('en-MY', { style: 'currency', currency: 'MYR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value || 0));
   const date = value => value ? new Intl.DateTimeFormat('en-MY', { dateStyle: 'medium' }).format(new Date(value)) : '—';
+  const malaysiaDay = value => { const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kuala_Lumpur', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(value)); const get = type => parts.find(part => part.type === type)?.value; return `${get('year')}-${get('month')}-${get('day')}`; };
   let context;
   let projects = [];
   let firstDemoPurchase = false;
@@ -266,8 +267,9 @@
     const statusMarkup = value => `<span class="status ${escapeHtml(String(value).replace(/[^a-z0-9-]/gi, '-').toLowerCase())}">${escapeHtml(statusName(value))}</span>`;
     const activeListings = listings.filter(listing => listing.status === 'active'); const sales = trades.filter(trade => trade.status === 'approved_demo'); const listedByProject = new Map(); activeListings.forEach(listing => listedByProject.set(listing.project_id, (listedByProject.get(listing.project_id) || 0) + Number(listing.quantity_tco2e || 0)));
     const activityByDay = new Map();
-    [...purchases.filter(row => row.request_status === 'approved_demo'), ...buyerTrades.filter(row => row.status === 'approved_demo')].forEach(row => { const day = String(row.reviewed_at || row.created_at || '').slice(0, 10); if (day) activityByDay.set(day, (activityByDay.get(day) || 0) + Number(row.quantity_tco2e || 0)); });
-    const activity = Array.from({ length: 7 }, (_, index) => { const day = new Date(); day.setDate(day.getDate() - 6 + index); const key = day.toISOString().slice(0, 10); return { label: key.slice(5), value: activityByDay.get(key) || 0 }; });
+    [...purchases.filter(row => row.request_status === 'approved_demo'), ...buyerTrades.filter(row => row.status === 'approved_demo')].forEach(row => { const timestamp = row.reviewed_at || row.created_at; if (timestamp) { const day = malaysiaDay(timestamp); activityByDay.set(day, (activityByDay.get(day) || 0) + Number(row.quantity_tco2e || 0)); } });
+    const malaysiaToday = new Date(`${malaysiaDay(new Date())}T00:00:00Z`);
+    const activity = Array.from({ length: 7 }, (_, index) => { const day = new Date(malaysiaToday); day.setUTCDate(day.getUTCDate() - 6 + index); const key = day.toISOString().slice(0, 10); return { label: key.slice(5), value: activityByDay.get(key) || 0 }; });
     const portfolio = rows.map(([projectId, quantity]) => ({ label: projectNames.get(projectId)?.project_name || projectId, value: quantity }));
     const contributionAvailable = contribution?.comparison_available === true;
     const contributionChart = contributionAvailable ? `<p><strong>${Number(contribution.my_purchase_tco2e || 0).toFixed(2)} tCO₂e</strong> · my approved simulated purchase activity</p>${miniShareDoughnut(contribution.my_approximate_percentage)}<p><strong>Approximate share of simulated purchase activity: ${Number(contribution.my_approximate_percentage || 0)}%</strong></p>` : '<p class="muted">Insufficient aggregated data for a privacy-safe comparison.</p>';
