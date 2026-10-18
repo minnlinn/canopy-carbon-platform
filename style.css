@@ -147,3 +147,5 @@ body{font-size:16px}.sidebar{overflow-y:auto}.workspace{margin:24px 0 17px}.work
 
 
 .canopy-live .demo-approval-actions button + button { margin-left: 0 !important; }
+
+.info-button{border:0;background:transparent;color:#1b513d;padding:0 3px;font:inherit;cursor:pointer}.walkthrough-actions{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:22px}.learn-section details{padding:14px 0;border-bottom:1px solid var(--line)}.learn-section summary{cursor:pointer;font-weight:700}.learn-section p,.learn-section ol{color:var(--muted);line-height:1.65}.learn-section .info-button{font-size:15px}
