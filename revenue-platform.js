@@ -49,7 +49,7 @@
   }
   async function completeDemo(orderId) {
     const payment = await rpc('canopy_simulate_billing_payment', { p_order_id: orderId });
-    await context.refresh();
+    try { await context.refresh(); } catch (_) { /* Backend payment already succeeded. */ }
     return payment;
   }
   async function startSubscription(orderType, title, benefits) {
@@ -69,8 +69,7 @@
         if (!isActive(activePlan)) throw new Error('Demo payment was confirmed, but the subscription is not active yet. Please refresh and try again.');
         const feedback = dialog.querySelector('#subscriptionResult'); feedback.className = 'feedback-message feedback-success'; feedback.textContent = '✓ Demo subscription confirmed. Your status and billing history are updating.';
         context.toast(`✓ ${orderType === 'partner_subscription' ? 'Partner Portal' : 'Premium'} subscription is active. Demo payment confirmed.`, 'success');
-        button.textContent = 'Confirmed';
-        await context.refresh();
+        button.className = 'account-action-label approved-label'; button.textContent = '✓ Done'; try { await context.refresh(); } catch (_) { /* Keep backend-confirmed payment visible. */ }
       } catch (error) { button.disabled = false; button.textContent = 'Confirm demo subscription'; const feedback = dialog.querySelector('#subscriptionResult'); feedback.className = 'feedback-message feedback-error'; feedback.textContent = error?.message || 'Could not confirm the demo subscription.'; }
     };
   }
@@ -139,20 +138,17 @@
     doc.save(filename);
   }
   function xlsxBook(sheets, filename) {
-    const XLSX = window.XLSX; if (!XLSX) throw new Error('Excel export support did not load. Reconnect and try again.');
+    const XLSX = window.XLSX; if (!XLSX?.utils || typeof XLSX.write !== 'function') throw new Error('Excel export support did not load. Reconnect and try again.');
     const book = XLSX.utils.book_new();
     sheets.forEach(({ name, rows, headerRow = 0, currencyColumns = [], filter = true }) => {
-      const sheet = XLSX.utils.aoa_to_sheet(rows);
-      const width = Math.max(...rows.map(row => row.length));
-      if (filter) sheet['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: headerRow, c: 0 }, e: { r: Math.max(headerRow, rows.length - 1), c: Math.max(0, width - 1) } }) };
-      sheet['!freeze'] = { xSplit: 0, ySplit: headerRow + 1 };
-      sheet['!cols'] = Array.from({ length: width }, (_, index) => ({ wch: Math.min(42, Math.max(14, ...rows.map(row => String(row[index] ?? '').length + 2))) }));
-      currencyColumns.forEach(column => { for (let row = headerRow + 1; row < rows.length; row += 1) { const cell = sheet[XLSX.utils.encode_cell({ r: row, c: column })]; if (cell && typeof cell.v === 'number') cell.z = 'RM #,##0.00'; } });
-      XLSX.utils.book_append_sheet(book, sheet, name);
+      const sheet = XLSX.utils.aoa_to_sheet(rows); const width = Math.max(1, ...rows.map(row => row.length));
+      if (filter && rows.length > headerRow + 1) sheet['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: headerRow, c: 0 }, e: { r: rows.length - 1, c: width - 1 } }) };
+      sheet['!freeze'] = { xSplit: 0, ySplit: headerRow + 1 }; sheet['!cols'] = Array.from({ length: width }, (_, index) => ({ wch: Math.min(42, Math.max(14, ...rows.map(row => String(row[index] ?? '').length + 2))) }));
+      currencyColumns.forEach(column => { for (let row = headerRow + 1; row < rows.length; row += 1) { const cell = sheet[XLSX.utils.encode_cell({ r: row, c: column })]; if (cell && typeof cell.v === 'number') cell.z = 'RM #,##0.00'; } }); XLSX.utils.book_append_sheet(book, sheet, name);
     });
-    XLSX.writeFile(book, filename);
-  }
-  const inPeriod = (value, start, end) => { const day = String(value || '').slice(0, 10); return (!start || day >= start) && (!end || day <= end); };
+    if (!window.URL?.createObjectURL) throw new Error('This browser cannot start an Excel download.');
+    const bytes = XLSX.write(book, { bookType: 'xlsx', type: 'array' }); const url = URL.createObjectURL(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })); const link = document.createElement('a'); link.href = url; link.download = filename; link.style.display = 'none'; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); return true;
+  }  const inPeriod = (value, start, end) => { const day = String(value || '').slice(0, 10); return (!start || day >= start) && (!end || day <= end); };
   async function demoData(start = '', end = '') {
     const [purchases, ledger, demoProjects, wallet] = await Promise.all([
       query('canopy_demo_purchase_requests', table => table.select('*').order('created_at', { ascending: true })),
@@ -160,20 +156,15 @@
       query('canopy_demo_projects', table => table.select('id,project_name,simulated_price_myr,simulated_inventory_tco2e').order('project_name')),
       query('canopy_demo_wallet_transactions', table => table.select('*').order('created_at', { ascending: true }))
     ]);
-    return { purchases: purchases.filter(row => inPeriod(row.created_at, start, end)), ledger: ledger.filter(row => inPeriod(row.created_at, start, end)), projects: new Map(demoProjects.map(row => [row.id, row])), wallet: wallet.filter(row => inPeriod(row.created_at, start, end)) };
+    return { purchases: purchases.filter(row => inPeriod(row.created_at, start, end)), ledger, projects: new Map(demoProjects.map(row => [row.id, row])), wallet, start, end };
   }
   async function downloadReportExcel(report) {
     const data = await demoData(report.period_start, report.period_end); const company = context.profile.company_name || context.profile.contact_name || 'SME';
     const holdings = new Map(); data.ledger.forEach(row => holdings.set(row.project_id, (holdings.get(row.project_id) || 0) + Number(row.delta_tco2e || 0)));
-    let running = 0; const walletRows = data.wallet.map(row => { running += Number(row.amount_myr || 0); return [date(row.created_at), walletTypeLabel(row), row.note, Number(row.amount_myr) > 0 ? Number(row.amount_myr) : '', Number(row.amount_myr) < 0 ? Math.abs(Number(row.amount_myr)) : '', running]; });
-    xlsxBook([
-      { name: 'Summary', filter: false, rows: [['CANOPY DEMO — SIMULATED DATA, NOT REAL CARBON CREDITS'], ['Company', company], ['Reporting period', `${report.period_start} to ${report.period_end}`], ['Note', 'No environmental impact, certificates, or real carbon-credit ownership is inferred.']] },
-      { name: 'Transaction History', currencyColumns: [3, 4, 5, 6], rows: [['Date', 'Project', 'Quantity tCO2e', 'Unit price MYR', 'Credit value MYR', 'Fee MYR', 'Total MYR', 'Status'], ...data.purchases.map(row => { const project = data.projects.get(row.project_id); return [date(row.created_at), project?.project_name || row.project_id, Number(row.quantity_tco2e), Number(row.simulated_unit_price_myr), Number(row.simulated_credit_value_myr), Number(row.simulated_platform_fee_myr), Number(row.simulated_total_myr), row.request_status]; })] },
-      { name: 'Carbon Holdings', rows: [['Project', 'Approved simulated quantity tCO2e'], ...[...holdings.entries()].map(([id, quantity]) => [data.projects.get(id)?.project_name || id, quantity])] },
-      { name: 'Demo Wallet', currencyColumns: [3, 4, 5], rows: [['Date', 'Type', 'Description', 'Money in MYR', 'Money out MYR', 'Running balance MYR'], ...walletRows] }
-    ], `Canopy_Demo_Carbon_ESG_Report_${report.period_start}_${report.period_end}.xlsx`);
-  }
-  function reportLines(data) {
+    const walletRows = data.wallet.filter(row => inPeriod(row.created_at, report.period_start, report.period_end)); let running = data.wallet.filter(row => String(row.created_at || '').slice(0, 10) < report.period_start).reduce((sum, row) => sum + Number(row.amount_myr || 0), 0);
+    const exportedWalletRows = walletRows.map(row => { running += Number(row.amount_myr || 0); return [date(row.created_at), walletTypeLabel(row), row.note, Number(row.amount_myr) > 0 ? Number(row.amount_myr) : '', Number(row.amount_myr) < 0 ? Math.abs(Number(row.amount_myr)) : '', running]; });
+    return xlsxBook([{ name: 'Summary', filter: false, rows: [['CANOPY DEMO — SIMULATED DATA, NOT REAL CARBON CREDITS'], ['Company', company], ['Reporting period', `${report.period_start} to ${report.period_end}`], ['Note', 'No environmental impact, certificates, or real carbon-credit ownership is inferred.']] }, { name: 'Transaction History', currencyColumns: [3, 4, 5, 6], rows: [['Date', 'Project', 'Quantity tCO2e', 'Unit price MYR', 'Credit value MYR', 'Fee MYR', 'Total MYR', 'Status'], ...data.purchases.map(row => { const project = data.projects.get(row.project_id); return [date(row.created_at), project?.project_name || row.project_id, Number(row.quantity_tco2e), Number(row.simulated_unit_price_myr), Number(row.simulated_credit_value_myr), Number(row.simulated_platform_fee_myr), Number(row.simulated_total_myr), row.request_status]; })] }, { name: 'Carbon Holdings', rows: [['Project', 'Available simulated quantity tCO2e'], ...[...holdings.entries()].filter(([, quantity]) => quantity > 0).map(([id, quantity]) => [data.projects.get(id)?.project_name || id, quantity])] }, { name: 'Demo Wallet', currencyColumns: [3, 4, 5], rows: [['Date', 'Type', 'Description', 'Money in MYR', 'Money out MYR', 'Running balance MYR'], ...exportedWalletRows] }], `Canopy_Demo_Carbon_ESG_Report_${report.period_start}_${report.period_end}.xlsx`);
+  }  function reportLines(data) {
     const lines = [
       `Reporting period: ${data.report.period_start} to ${data.report.period_end}`,
       `Company: ${data.company.company_name || 'Not supplied'}`,
@@ -201,7 +192,7 @@
   async function startReportPayment(start, end) {
     const order = await createCheckout('esg_report', start, end); const wallet = await rpc('canopy_demo_wallet_summary'); const balance = Number(wallet.balance_myr || 0); const amount = Number(order.amount_myr || 0); const shortfall = Math.max(0, amount - balance); const enough = balance >= amount;
     const dialog = modal(`<h2>Confirm Carbon & ESG report</h2><dl class="details"><div><dt>Report fee</dt><dd>${cash(amount)}</dd></div><div><dt>Demo RM Wallet</dt><dd>${cash(balance)}</dd></div><div><dt>Remaining after payment</dt><dd>${cash(Math.max(0,balance-amount))}</dd></div></dl><p class="fine-print">Demo only — no real payment. The workbook includes only available Canopy records.</p><button class="btn secondary" id="openWallet" type="button">Open Demo RM Wallet</button> <button class="btn primary" id="confirmReport" ${enough?'':'disabled'}>Confirm demo payment</button><p id="reportPaymentResult" class="feedback-message ${enough?'':'feedback-error'}">${enough?'':`Insufficient demo wallet balance. Please top up RM ${shortfall.toFixed(2)} to complete this demo purchase.`}</p>`);
-    dialog.querySelector('#openWallet').onclick=()=>{dialog.close();context.openWallet?.();}; const button=dialog.querySelector('#confirmReport'); button.onclick=async()=>{button.disabled=true;button.textContent='Confirming…';try{await completeDemo(order.id);const feedback=dialog.querySelector('#reportPaymentResult');feedback.className='feedback-message feedback-success';feedback.textContent='✓ Demo payment confirmed. Your Excel report is ready in Report History.';context.toast('✓ Demo report payment confirmed. No real money was collected.','success');await context.refresh();}catch(error){button.disabled=false;button.textContent='Confirm demo payment';const feedback=dialog.querySelector('#reportPaymentResult');feedback.className='feedback-message feedback-error';feedback.textContent=error?.message||'Could not confirm this demo payment.';}};
+    dialog.querySelector('#openWallet').onclick=()=>{dialog.close();context.openWallet?.();}; const button=dialog.querySelector('#confirmReport'); button.onclick=async()=>{button.disabled=true;button.textContent='Confirming…';try{await completeDemo(order.id);const feedback=dialog.querySelector('#reportPaymentResult');feedback.className='feedback-message feedback-success';feedback.textContent='✓ Demo payment confirmed. Use Download Excel in Report History to generate the workbook.';button.className='account-action-label approved-label';button.textContent='✓ Done';context.toast('✓ Demo report payment confirmed. No real money was collected.','success');try{await context.refresh();}catch(_){/* Keep backend-confirmed payment visible. */}}catch(error){button.disabled=false;button.textContent='Confirm demo payment';const feedback=dialog.querySelector('#reportPaymentResult');feedback.className='feedback-message feedback-error';feedback.textContent=error?.message||'Could not confirm this demo payment.';}};
   }
   async function reportsView() {
     const rows = await getReportRows();
@@ -224,7 +215,7 @@
       button.disabled = true;
       try {
         await downloadReportExcel(rows.find(row => row.id === button.dataset.downloadReport));
-        context.toast('✓ Demo Carbon & ESG Excel report downloaded. Simulated data only.', 'success');
+        context.toast('✓ Demo Carbon & ESG Excel download started. Simulated data only.', 'success');
       } catch (error) { showError(error); }
       finally { button.disabled = false; }
     }));
@@ -398,7 +389,7 @@
     const feedback=context.walletNotice||null; context.walletNotice=null;
     content(`<div class="page-heading"><div><span class="eyebrow">SIMULATED FUNDS</span><h1>Demo RM Wallet</h1><p>Demo only — no real money. Wallet funds support simulated Canopy actions only.</p></div></div><div class="metric-grid"><article><span>Demo balance</span><strong>${cash(wallet.balance_myr)}</strong></article></div><section class="revenue-section"><h2>Top up demo balance</h2><form id="walletTopUpForm" class="revenue-inline-form"><label>Amount (MYR)<input name="amount" type="number" min="1" step="0.01" required></label><button class="btn primary" type="submit">Add demo funds</button></form>${feedback?`<p class="feedback-message feedback-${feedback.type}" aria-live="polite">${escapeHtml(feedback.text)}</p>`:''}</section><section class="revenue-section"><h2>Wallet transactions</h2><form id="walletExportForm" class="revenue-inline-form"><label>From<input name="start" type="date"></label><label>To<input name="end" type="date"></label><button class="btn secondary" type="submit">Download Transaction History (Excel)</button></form>${transactions.length?`<div class="table-wrap"><table><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Note</th></tr></thead><tbody>${transactions.map(row=>`<tr><td>${date(row.created_at)}</td><td>${escapeHtml(walletTypeLabel(row))}</td><td>${cash(row.amount_myr)}</td><td>${escapeHtml(row.note||'—')}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No demo wallet transactions yet.</p>'}</section>`);
     document.querySelector('#walletTopUpForm').addEventListener('submit', async event => { event.preventDefault(); const button=event.submitter; if(button)button.disabled=true; try { await rpc('canopy_demo_wallet_top_up',{p_amount_myr:Number(new FormData(event.currentTarget).get('amount')),p_idempotency_key:crypto.randomUUID()}); context.walletNotice={type:'success',text:'✓ Demo wallet top-up recorded. No real money was received.'}; context.toast(context.walletNotice.text,'success'); await mount('wallet',context); } catch(error) { if(button)button.disabled=false; context.walletNotice={type:'error',text:error?.message||'Could not add demo funds.'}; context.toast(context.walletNotice.text,'error'); await mount('wallet',context); } });
-    document.querySelector('#walletExportForm').addEventListener('submit', async event => { event.preventDefault(); const button=event.submitter; if(button?.disabled)return; const values=new FormData(event.currentTarget); const start=values.get('start'); const end=values.get('end'); if(end&&start&&end<start){context.toast('The end date must be on or after the start date.','error');return;} const rows=transactions.filter(row=>inPeriod(row.created_at,start,end)).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)); if(!rows.length){context.toast('No wallet transactions match this date range.','error');return;} if(button)button.disabled=true; try{let running=transactions.filter(row=>start&&String(row.created_at).slice(0,10)<start).reduce((sum,row)=>sum+Number(row.amount_myr||0),0); const opening=running; const exported=rows.map(row=>{running+=Number(row.amount_myr||0);return [new Date(row.created_at).toLocaleString('en-MY'),walletTypeLabel(row),row.note||'',Number(row.amount_myr)>0?Number(row.amount_myr):'',Number(row.amount_myr)<0?Math.abs(Number(row.amount_myr)): '',running];}); const inflows=rows.filter(row=>Number(row.amount_myr)>0).reduce((sum,row)=>sum+Number(row.amount_myr),0);const outflows=rows.filter(row=>Number(row.amount_myr)<0).reduce((sum,row)=>sum+Math.abs(Number(row.amount_myr)),0);xlsxBook([{name:'Demo Wallet',headerRow:6,currencyColumns:[3,4,5],rows:[['DEMO ONLY — NO REAL MONEY'],['Opening balance MYR',opening],['Total inflows MYR',inflows],['Total outflows MYR',outflows],['Closing balance MYR',running],[],['Date / time','Transaction type','Description','Money in MYR','Money out MYR','Running balance MYR'],...exported]}],`Canopy_Demo_Wallet_Transactions_${new Date().toISOString().slice(0,10)}.xlsx`);context.toast('✓ Demo wallet transaction history downloaded. No real money.','success');}catch(error){context.toast(error?.message||'Could not create the Demo Wallet Excel export.','error');}finally{if(button)button.disabled=false;} });
+    document.querySelector('#walletExportForm').addEventListener('submit', async event => { event.preventDefault(); const button=event.submitter; if(button?.disabled)return; const values=new FormData(event.currentTarget); const start=values.get('start'); const end=values.get('end'); if(end&&start&&end<start){context.toast('The end date must be on or after the start date.','error');return;} const rows=transactions.filter(row=>inPeriod(row.created_at,start,end)).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)); if(!rows.length){context.toast('No wallet transactions match this date range.','error');return;} if(button)button.disabled=true; try{let running=transactions.filter(row=>start&&String(row.created_at).slice(0,10)<start).reduce((sum,row)=>sum+Number(row.amount_myr||0),0); const opening=running; const exported=rows.map(row=>{running+=Number(row.amount_myr||0);return [new Date(row.created_at).toLocaleString('en-MY'),walletTypeLabel(row),row.note||'',Number(row.amount_myr)>0?Number(row.amount_myr):'',Number(row.amount_myr)<0?Math.abs(Number(row.amount_myr)): '',running];}); const inflows=rows.filter(row=>Number(row.amount_myr)>0).reduce((sum,row)=>sum+Number(row.amount_myr),0);const outflows=rows.filter(row=>Number(row.amount_myr)<0).reduce((sum,row)=>sum+Math.abs(Number(row.amount_myr)),0);xlsxBook([{name:'Demo Wallet',headerRow:6,currencyColumns:[3,4,5],rows:[['DEMO ONLY — NO REAL MONEY'],['Opening balance MYR',opening],['Total inflows MYR',inflows],['Total outflows MYR',outflows],['Closing balance MYR',running],[],['Date / time','Transaction type','Description','Money in MYR','Money out MYR','Running balance MYR'],...exported]}],`Canopy_Demo_Wallet_Transactions_${new Date().toISOString().slice(0,10)}.xlsx`);context.toast('✓ Demo wallet Excel download started. No real money.','success');}catch(error){context.toast(error?.message||'Could not create the Demo Wallet Excel export.','error');}finally{if(button)button.disabled=false;} });
   }
 
   async function mount(view, values) {
