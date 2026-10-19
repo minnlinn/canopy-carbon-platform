@@ -245,16 +245,17 @@
     let analytics = { total_referred: 0, verified_referred: 0, transaction_volume_myr: 0, credits_purchased: 0, credits_retired: 0, reward_type: 'disabled' };
     let referrals = [];
     let insights = null;
+    let referralError = '';
     if (active) {
-      const referralStats = await rpc('canopy_partner_referral_statistics');
-      [code, referrals, insights] = await Promise.all([
-        rpc('canopy_create_partner_code'), rpc('canopy_partner_referred_smes'), rpc('canopy_partner_market_insights')
-      ]);
-      analytics = {
-        ...analytics,
-        total_referred: Number(referralStats?.total_referred || 0),
-        verified_referred: Number(referralStats?.verified_referred || 0)
-      };
+      try {
+        const [statRows, partnerCode, referredRows, insightData] = await Promise.all([
+          rpc('canopy_partner_referral_statistics'), rpc('canopy_create_partner_code'), rpc('canopy_partner_referred_smes'), rpc('canopy_partner_market_insights')
+        ]);
+        const referralStats = Array.isArray(statRows) ? statRows[0] : null;
+        if (!referralStats) throw new Error('Referral statistics were unavailable.');
+        code = partnerCode; referrals = referredRows; insights = insightData;
+        analytics = { ...analytics, total_referred: Number(referralStats.total_referred || 0), verified_referred: Number(referralStats.verified_referred || 0) };
+      } catch (error) { referralError = error?.message || 'Could not load referral statistics.'; }
       const rewardEstimate = analytics.reward_type === 'percentage'
         ? Number(analytics.transaction_volume_myr || 0) * Number(analytics.reward_percent || 0)
         : analytics.reward_type === 'fixed_myr'
@@ -262,11 +263,11 @@
           : 0;
       const link = new URL('./', location.href);
       link.searchParams.set('ref', code);
-      portal = `<section class="revenue-section"><h2>Your referral link</h2><div class="revenue-referral"><input id="partnerReferralLink" readonly value="${escapeHtml(link.href)}"><button class="btn secondary" id="copyReferral">Copy link</button></div></section><div class="metric-grid"><article><span>SMEs referred</span><strong>${analytics.total_referred || 0}</strong></article><article><span>Active (verified) SMEs</span><strong>${analytics.verified_referred || 0}</strong></article><article><span>Transaction volume</span><strong>${cash(analytics.transaction_volume_myr)}</strong></article><article><span>Credits purchased / retired</span><strong>${Number(analytics.credits_purchased || 0).toLocaleString()} / ${Number(analytics.credits_retired || 0).toLocaleString()} tCO₂e</strong></article><article><span>Configured reward estimate · not settled</span><strong>${analytics.reward_type === 'disabled' ? 'Not configured' : cash(rewardEstimate)}</strong></article></div><p class="revenue-note">Referral attribution never grants access to SME data. A business profile appears only while the SME has separately shared it.</p><section class="revenue-section"><h2>Referred SMEs</h2>${referrals.length ? `<div class="table-wrap"><table><thead><tr><th>Company</th><th>Sector</th><th>Verification</th><th>Referral linked</th><th></th></tr></thead><tbody>${referrals.map(referral => `<tr><td>${referral.profile_shared ? escapeHtml(referral.company_name) : 'Company profile not shared'}</td><td>${referral.profile_shared ? escapeHtml(referral.sector || 'Not supplied') : '—'}</td><td>${escapeHtml(referral.verification_status)}</td><td>${date(referral.linked_at)}</td><td>${referral.profile_shared ? `<button class="btn secondary" data-referral-profile="${referral.sme_id}">View profile</button>` : 'Profile sharing not granted'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No SMEs have used your referral code yet.</p>'}</section>`;
+      portal = referralError ? `<section class="revenue-section"><h2>Referral tools unavailable</h2><p class="feedback-message feedback-error">${escapeHtml(referralError)}</p></section>` : `<section class="revenue-section"><h2>Your referral link</h2><div class="revenue-referral"><input id="partnerReferralLink" readonly value="${escapeHtml(link.href)}"><button class="btn secondary" id="copyReferral">Copy link</button></div></section><div class="metric-grid"><article><span>SMEs referred</span><strong>${analytics.total_referred}</strong></article><article><span>Active (verified) SMEs</span><strong>${analytics.verified_referred}</strong></article><article><span>Transaction volume</span><strong>${cash(analytics.transaction_volume_myr)}</strong></article><article><span>Credits purchased / retired</span><strong>${Number(analytics.credits_purchased || 0).toLocaleString()} / ${Number(analytics.credits_retired || 0).toLocaleString()} tCO₂e</strong></article><article><span>Configured reward estimate · not settled</span><strong>${analytics.reward_type === 'disabled' ? 'Not configured' : cash(rewardEstimate)}</strong></article></div><p class="revenue-note">Referral attribution never grants access to SME data. A business profile appears only while the SME has separately shared it.</p><section class="revenue-section"><h2>Referred SMEs</h2>${referrals.length ? `<div class="table-wrap"><table><thead><tr><th>Company</th><th>Sector</th><th>Verification</th><th>Referral linked</th><th></th></tr></thead><tbody>${referrals.map(referral => `<tr><td>${referral.profile_shared ? escapeHtml(referral.company_name) : 'Company profile not shared'}</td><td>${referral.profile_shared ? escapeHtml(referral.sector || 'Not supplied') : '—'}</td><td>${escapeHtml(referral.verification_status)}</td><td>${date(referral.linked_at)}</td><td>${referral.profile_shared ? `<button class="btn secondary" data-referral-profile="${referral.sme_id}">View profile</button>` : 'Profile sharing not granted'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No SMEs have used your referral code yet.</p>'}</section>`;
     }
     content(`<div class="page-heading"><div><span class="eyebrow">PARTNER PORTAL</span><h1>Partner dashboard</h1><p>Manage referrals, authorized client data and your subscription.</p></div></div><div class="revenue-plan"><div><p class="eyebrow">PARTNER SUBSCRIPTION</p><h2>${cash(500)} / month</h2><p>Referral management, client analytics, project information and reporting tools.</p></div><div><strong>Subscription status</strong><p>${status(plan?.status || 'Inactive')}</p><small>Renewal: ${date(plan?.renewal_at)}</small>${active && plan.status === 'active_demo' ? `<p>${demoLabel}</p>` : ''}${active ? '<button class="btn secondary" data-cancel-plan="partner">Cancel subscription</button>' : '<button class="btn primary" data-subscribe="partner_subscription">Subscribe</button>'}</div></div>${checkout(checkoutOrder, 'Partner Portal monthly subscription')}${portal}${active ? marketInsightsMarkup(insights) : ''}<section class="revenue-section"><h2>Billing history</h2>${historyTable(history)}</section>`);
     if (active) {
-      document.querySelector('#copyReferral').addEventListener('click', async () => {
+      document.querySelector('#copyReferral')?.addEventListener('click', async () => {
         try { await navigator.clipboard.writeText(linkValue()); context.toast('✓ Referral link copied successfully!', 'success'); } catch { context.toast('Could not copy the referral link. Please copy it from the field.', 'error'); }
       });
       document.querySelectorAll('[data-referral-profile]').forEach(button => button.addEventListener('click', async () => {
