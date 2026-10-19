@@ -81,7 +81,46 @@
 
   async function loadSmeListings() {
     const target = $('#smeListings'); if (!target || context.profile?.role !== 'sme') return;
-    try { const listings = await query('canopy_demo_trade_listings', table => table.select('*').eq('status','active').order('created_at', { ascending: false })); const names = new Map(projects.map(project => [project.id, project.project_name])); const visible = listings.filter(listing => listing.seller_id !== context.profile.id); target.innerHTML = `<section class="revenue-section"><h2>SME Listings</h2><p>DEMO ONLY — simulated SME-to-SME trades require Admin approval.</p>${visible.length ? `<div class="table-wrap"><table><thead><tr><th>Project</th><th>Quantity</th><th>Price</th><th>Simulated total</th><th></th></tr></thead><tbody>${visible.map(listing => { const value = Number(listing.quantity_tco2e) * Number(listing.unit_price_myr); const fee = value * .015; return `<tr><td>${escapeHtml(names.get(listing.project_id) || listing.project_id)}</td><td>${Number(listing.quantity_tco2e).toFixed(2)} tCO₂e</td><td>${cash(listing.unit_price_myr)} / tCO₂e</td><td>${cash(value + fee)}<small>Includes 1.5% buyer fee · simulated</small></td><td><button class="btn primary" data-trade-buy="${listing.id}">Buy listing</button></td></tr>`; }).join('')}</tbody></table></div>` : '<p class="muted">No other SME demo listings are active.</p>'}</section>`; $$('[data-trade-buy]').forEach(button => button.onclick = async () => { if (!window.confirm('Request this DEMO trade for Admin approval?')) return; button.disabled = true; try { await rpc('canopy_request_demo_trade', { p_listing_id: button.dataset.tradeBuy, p_idempotency_key: crypto.randomUUID() }); context.toast('✓ Demo trade request submitted for Admin approval.', 'success'); await loadSmeListings(); } catch (error) { button.disabled = false; context.toast(error.message || 'Could not request this demo trade.', 'error'); } }); } catch (error) { target.innerHTML = '<p class="muted">SME Listings are unavailable until Migration 011 is applied.</p>'; } }
+    try {
+      const listings = await query('canopy_demo_trade_listings', table => table.select('*').eq('status', 'active').order('created_at', { ascending: false }));
+      const names = new Map(projects.map(project => [project.id, project.project_name]));
+      const visible = listings.filter(listing => listing.seller_id !== context.profile.id);
+      target.innerHTML = `<section class="revenue-section"><h2>SME Listings</h2><p>DEMO ONLY — simulated SME-to-SME trades require Admin approval.</p>${visible.length ? `<div class="table-wrap"><table><thead><tr><th>Project</th><th>Quantity</th><th>Price</th><th>Simulated total</th><th></th></tr></thead><tbody>${visible.map(listing => { const value = Number(listing.quantity_tco2e) * Number(listing.unit_price_myr); const fee = value * .015; return `<tr><td>${escapeHtml(names.get(listing.project_id) || listing.project_id)}</td><td>${Number(listing.quantity_tco2e).toFixed(2)} tCO₂e</td><td>${cash(listing.unit_price_myr)} / tCO₂e</td><td>${cash(value + fee)}<small>Includes 1.5% buyer fee · simulated</small></td><td><button class="btn primary" data-trade-buy="${listing.id}">Buy listing</button></td></tr>`; }).join('')}</tbody></table></div>` : '<p class="muted">No other SME demo listings are active.</p>'}</section>`;
+      $$('[data-trade-buy]').forEach(button => button.onclick = () => {
+        const listing = visible.find(item => item.id === button.dataset.tradeBuy);
+        if (!listing) return;
+        const projectName = names.get(listing.project_id) || 'Demo project';
+        const quantity = Number(listing.quantity_tco2e);
+        const unitPrice = Number(listing.unit_price_myr);
+        const creditValue = Math.round(quantity * unitPrice * 100) / 100;
+        const buyerFee = Math.round(creditValue * 0.015 * 100) / 100;
+        const total = creditValue + buyerFee;
+        const requestKey = crypto.randomUUID();
+        const dialog = modal(`<h2>Request demo listing purchase</h2><p><strong>${escapeHtml(projectName)}</strong></p><p>DEMO ONLY — this simulated trade reserves Demo RM Wallet funds and requires Admin approval. No real payment or carbon credits are involved.</p><dl class="demo-purchase-quote"><div><dt>Quantity</dt><dd>${quantity.toFixed(2)} tCO₂e</dd></div><div><dt>Unit price</dt><dd>${cash(unitPrice)} / tCO₂e</dd></div><div><dt>Credit value</dt><dd>${cash(creditValue)}</dd></div><div><dt>Buyer transaction fee (1.5%)</dt><dd>${cash(buyerFee)}</dd></div><div><dt>Total simulated payment</dt><dd>${cash(total)}</dd></div></dl><form id="demoTradePurchaseForm" class="dialog-form"><div class="walkthrough-actions"><button class="btn secondary" type="button" id="cancelDemoTradePurchase">Cancel</button><button class="btn primary" type="submit">Request purchase</button></div><p id="demoTradePurchaseResult" class="feedback-message" role="status" aria-live="polite"></p></form>`);
+        const opener = button;
+        dialog.addEventListener('close', () => opener.isConnected && opener.focus(), { once: true });
+        $('#cancelDemoTradePurchase').onclick = () => dialog.close();
+        $('#demoTradePurchaseForm').querySelector('[type="submit"]').focus();
+        $('#demoTradePurchaseForm').onsubmit = async event => {
+          event.preventDefault();
+          const submit = event.currentTarget.querySelector('[type="submit"]');
+          const feedback = $('#demoTradePurchaseResult');
+          submit.disabled = true; submit.textContent = 'Requesting…';
+          try {
+            await rpc('canopy_request_demo_trade', { p_listing_id: listing.id, p_idempotency_key: requestKey });
+            const message = '✓ Demo trade request submitted for Admin approval.';
+            feedback.className = 'feedback-message feedback-success'; feedback.textContent = message;
+            submit.className = 'account-action-label approved-label'; submit.textContent = '✓ Done';
+            context.toast(message, 'success');
+            await loadSmeListings();
+          } catch (error) {
+            submit.disabled = false; submit.className = 'btn primary'; submit.textContent = 'Request purchase';
+            feedback.className = 'feedback-message feedback-error'; feedback.textContent = error.message || 'Could not request this demo trade.';
+          }
+        };
+      });
+    } catch (error) { target.innerHTML = '<p class="muted">SME Listings are unavailable until Migration 011 is applied.</p>'; }
+  }
   function renderMarket() {
     const locations = [...new Set(projects.map(project => locationRegion(project.location)))].sort();
     const categories = [...new Set(projects.map(project => project.category))].sort();
