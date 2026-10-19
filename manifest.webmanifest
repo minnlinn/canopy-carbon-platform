@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "Canopy",
-  "short_name": "Canopy",
+  "name": "canopy",
+  "short_name": "canopy",
   "description": "Canopy is an admin-managed carbon-credit platform for Malaysian SMEs.",
   "start_url": "/",
   "scope": "/",
