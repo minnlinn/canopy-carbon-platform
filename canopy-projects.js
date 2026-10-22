@@ -299,15 +299,35 @@
   function retirementStatus(value) {
     return ({ requested: 'Requested', processing: 'Processing', completed: 'Completed (Demo)', rejected: 'Rejected', failed: 'Failed', voided: 'Voided' })[value] || value;
   }
+  function loadExternalScript(src, ready) {
+    if (ready()) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const finish = () => ready() ? resolve() : reject(new Error('Statement download support did not load. Reconnect and try again.'));
+      // Retry a cached or previously failed deferred CDN script instead of waiting forever on it.
+      [...document.scripts].find(script => script.src === src)?.remove();
+      const script = document.createElement('script');
+      script.src = src; script.async = true;
+      script.onload = finish;
+      script.onerror = () => reject(new Error('Statement download support did not load. Reconnect and try again.'));
+      document.head.appendChild(script);
+    });
+  }
+  async function retirementQrDataUrl(verificationUrl) {
+    if (!window.QRCode?.toDataURL) await loadExternalScript('https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js', () => Boolean(window.QRCode?.toDataURL));
+    return window.QRCode.toDataURL(verificationUrl, { margin: 1, width: 300, errorCorrectionLevel: 'M' });
+  }
   async function downloadRetirementStatement(row, project) {
-    const JsPDF = window.jspdf?.jsPDF; const QRCode = window.QRCode;
-    if (!JsPDF || !QRCode?.toDataURL) throw new Error('Statement download support did not load. Reconnect and try again.');
+    if (!window.jspdf?.jsPDF) await loadExternalScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js', () => Boolean(window.jspdf?.jsPDF));
     const verificationUrl = `${window.location.origin}${window.location.pathname.replace(/[^/]*$/, '')}verify.html?ref=${encodeURIComponent(row.statement_reference)}`;
-    const qrData = await QRCode.toDataURL(verificationUrl, { margin: 1, width: 300 }); const doc = new JsPDF({ unit: 'pt', format: 'a4' });
-    doc.setFillColor(27, 81, 61); doc.rect(0, 0, 595, 78, 'F'); doc.setTextColor(255,255,255); doc.setFontSize(24); doc.text('canopy',42,48);
-    doc.setTextColor(27,59,46); doc.setFontSize(23); doc.text('Canopy Retirement Statement',42,125); doc.setFontSize(10); doc.setTextColor(90,112,99); doc.text('DEMONSTRATION ONLY — Simulated retirement. Not an official carbon registry certificate or proof of verified emission reduction.',42,148,{maxWidth:500});
-    const lines=[['Statement reference',row.statement_reference],['Beneficiary',row.beneficiary_name],['Project',project?.project_name||'Demonstration project'],['Quantity retired',`${Number(row.quantity_tco2e).toFixed(2)} tCO₂e`],['Purpose',row.retirement_purpose||'Not supplied'],['Retirement date',date(row.completed_at||row.requested_at)],['Status',retirementStatus(row.status)],['Pool reference',row.pool_reference||'Not applicable'],['Illustrative fee',`USD ${Number(row.retirement_fee_usd||0).toFixed(2)} — informational only`]];
-    let y=195; lines.forEach(([label,value])=>{doc.setFontSize(10);doc.setTextColor(90,112,99);doc.text(label,42,y);doc.setFontSize(13);doc.setTextColor(27,59,46);doc.text(String(value),220,y);y+=28;}); doc.addImage(qrData,'PNG',410,425,130,130);doc.setFontSize(9);doc.setTextColor(90,112,99);doc.text('Scan to verify this Canopy demonstration record',360,575,{maxWidth:190,align:'center'});doc.save(`Canopy_Retirement_Statement_${row.statement_reference}.pdf`);
+    const qrData = await retirementQrDataUrl(verificationUrl);
+    const doc = new window.jspdf.jsPDF({ unit: 'pt', format: 'a4' });
+    doc.setFillColor(27, 81, 61); doc.rect(0, 0, 595, 86, 'F'); doc.setTextColor(255,255,255); doc.setFontSize(24); doc.text('canopy',42,52);
+    doc.setTextColor(27,59,46); doc.setFontSize(23); doc.text('Canopy Retirement Statement',42,126); doc.setFontSize(10); doc.setTextColor(90,112,99); doc.text('DEMONSTRATION ONLY — simulated retirement; not an official registry certificate or evidence of verified emissions reduction.',42,149,{maxWidth:500});
+    const lines=[['Statement reference',row.statement_reference],['Beneficiary',row.beneficiary_name],['Project',project?.project_name||'Demonstration project'],['Registry reference',project ? `${project.registry_name} ${project.registry_project_id}` : 'Not available'],['Quantity retired',`${Number(row.quantity_tco2e).toFixed(2)} tCO₂e`],['Purpose',row.retirement_purpose||'Not supplied'],['Requested date',date(row.requested_at)],['Completed date',date(row.completed_at||row.requested_at)],['Status','Completed (Demo)'],['Pool reference',row.pool_reference||'Not applicable']];
+    let y=190; lines.forEach(([label,value], index) => { if (index % 2 === 0) { doc.setFillColor(246,249,245); doc.rect(36,y-17,330,25,'F'); } doc.setFontSize(9); doc.setTextColor(90,112,99); doc.text(label,44,y); doc.setFontSize(11); doc.setTextColor(27,59,46); doc.text(String(value),174,y,{maxWidth:182}); y+=28; });
+    doc.addImage(qrData,'PNG',396,412,144,144); doc.setFontSize(9); doc.setTextColor(90,112,99); doc.text('Scan to verify this public demonstration record',468,575,{maxWidth:150,align:'center'}); doc.setFontSize(8); doc.text(verificationUrl,42,618,{maxWidth:500});
+    doc.setDrawColor(199,216,201); doc.line(42,660,553,660); doc.setFontSize(9); doc.setTextColor(90,112,99); doc.text('This statement records a Canopy DEMO / SIMULATED retirement only. It does not transfer, retire, or verify real carbon credits and does not create registry-backed ownership.',42,682,{maxWidth:510});
+    doc.save(`Canopy_Retirement_Statement_${row.statement_reference}.pdf`);
   }
   function openRetirementDialog(project, available, companyName) {
     const dialog=modal(`<section class="retirement-dialog"><h2>Retire simulated credits</h2><p><strong>${escapeHtml(project.project_name)}</strong><br><small>${escapeHtml(`${project.registry_name} ${project.registry_project_id}`)}</small></p><p class="fine-print">DEMO / SIMULATED only. No real carbon credits, registry retirement, payment, or verified emissions reduction is created.</p><form id="demoRetirementForm" class="dialog-form"><dl class="details"><div><dt>Available to retire</dt><dd>${available.toFixed(2)} tCO₂e</dd></div><div><dt>Illustrative retirement fee</dt><dd id="retirementFee">USD 0.00 <small>informational only</small></dd></div></dl><label>Quantity to retire (tCO₂e)<input name="quantity" type="number" min="0.01" max="${available.toFixed(2)}" step="0.01" value="0.01" required></label><label>Beneficiary name<input name="beneficiary" value="${escapeHtml(companyName||'')}" minlength="2" required></label><label>Retirement purpose <small>(optional)</small><textarea name="purpose" placeholder="e.g. 2026 operational emissions"></textarea></label><div class="retirement-summary"><span>Remaining available balance</span><strong id="retirementRemaining"></strong></div><p id="retirementFractionNote" class="fine-print"></p><label class="ack"><input name="confirm" type="checkbox" required> <span><strong>Retirement is permanent.</strong> Retired credits cannot be sold, transferred or used again.</span></label><div class="purchase-actions"><button class="btn secondary" type="button" data-retirement-close>Cancel</button><button class="btn primary" type="submit">Submit retirement request</button></div><p id="retirementResult" class="feedback-message" aria-live="polite" hidden></p></form></section>`);
