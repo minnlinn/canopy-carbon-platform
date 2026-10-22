@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'canopy-shell-v9';
+const CACHE_NAME = 'canopy-shell-v10';
 const SHELL_FILES = [
   './',
   './index.html',
@@ -14,6 +14,8 @@ const SHELL_FILES = [
   './revenue-platform.js',
   './canopy-projects.css',
   './canopy-projects.js',
+  './vendor/jspdf.umd.min.js',
+  './vendor/qrcode-generator.js',
   './app.js',
   './reset-password.js',
   './pwa.js',
