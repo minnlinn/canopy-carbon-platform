@@ -317,10 +317,20 @@
     const verificationUrl = `${window.location.origin}${window.location.pathname.replace(/[^/]*$/, '')}verify.html?ref=${encodeURIComponent(row.statement_reference)}`;
     const qrData = retirementQrDataUrl(verificationUrl);
     const doc = new window.jspdf.jsPDF({ unit: 'pt', format: 'a4' });
+    // jsPDF's bundled standard fonts use WinAnsi encoding and cannot render U+2082 reliably.
+    // Compose tCO₂e with a positioned numeral so the PDF remains portable without a new font.
+    const drawTco2e = (x, y, quantity) => {
+      const amount = Number(quantity).toFixed(2);
+      doc.setFontSize(11); doc.text(`${amount} tCO`, x, y);
+      const subscriptX = x + doc.getTextWidth(`${amount} tCO`);
+      doc.setFontSize(7); doc.text('2', subscriptX, y + 2.5);
+      const suffixX = subscriptX + doc.getTextWidth('2');
+      doc.setFontSize(11); doc.text('e', suffixX, y);
+    };
     doc.setFillColor(27, 81, 61); doc.rect(0, 0, 595, 86, 'F'); doc.setTextColor(255,255,255); doc.setFontSize(24); doc.text('canopy',42,52);
     doc.setTextColor(27,59,46); doc.setFontSize(23); doc.text('Canopy Retirement Statement',42,126); doc.setFontSize(10); doc.setTextColor(90,112,99); doc.text('DEMONSTRATION ONLY — simulated retirement; not an official registry certificate or evidence of verified emissions reduction.',42,149,{maxWidth:500});
-    const lines=[['Statement reference',row.statement_reference],['Beneficiary',row.beneficiary_name],['Project',project?.project_name||'Demonstration project'],['Registry reference',project ? `${project.registry_name} ${project.registry_project_id}` : 'Not available'],['Quantity retired',`${Number(row.quantity_tco2e).toFixed(2)} tCO₂e`],['Purpose',row.retirement_purpose||'Not supplied'],['Requested date',date(row.requested_at)],['Completed date',date(row.completed_at||row.requested_at)],['Status','Completed (Demo)'],['Pool reference',row.pool_reference||'Not applicable']];
-    let y=190; lines.forEach(([label,value], index) => { if (index % 2 === 0) { doc.setFillColor(246,249,245); doc.rect(36,y-17,348,25,'F'); } doc.setFontSize(9); doc.setTextColor(90,112,99); doc.text(label,44,y); doc.setFontSize(11); doc.setTextColor(27,59,46); if (label === 'Project') { const projectWidth=216; const fittedSize=Math.min(11, 11 * projectWidth / doc.getTextWidth(String(value))); doc.setFontSize(fittedSize); doc.text(String(value),166,y); } else doc.text(String(value),166,y,{maxWidth:216}); y+=28; });
+    const lines=[['Statement reference',row.statement_reference],['Beneficiary',row.beneficiary_name],['Project',project?.project_name||'Demonstration project'],['Registry reference',project ? `${project.registry_name} ${project.registry_project_id}` : 'Not available'],['Quantity retired',row.quantity_tco2e],['Purpose',row.retirement_purpose||'Not supplied'],['Requested date',date(row.requested_at)],['Completed date',date(row.completed_at||row.requested_at)],['Status','Completed (Demo)'],['Pool reference',row.pool_reference||'Not applicable']];
+    let y=190; lines.forEach(([label,value], index) => { if (index % 2 === 0) { doc.setFillColor(246,249,245); doc.rect(36,y-17,348,25,'F'); } doc.setFontSize(9); doc.setTextColor(90,112,99); doc.text(label,44,y); doc.setFontSize(11); doc.setTextColor(27,59,46); if (label === 'Quantity retired') drawTco2e(166, y, value); else if (label === 'Project') { const projectWidth=216; const fittedSize=Math.min(11, 11 * projectWidth / doc.getTextWidth(String(value))); doc.setFontSize(fittedSize); doc.text(String(value),166,y); } else doc.text(String(value),166,y,{maxWidth:216}); y+=28; });
     doc.addImage(qrData,'PNG',396,454,132,132); doc.setFontSize(9); doc.setTextColor(90,112,99); doc.text('Scan to verify this public demonstration record',462,606,{maxWidth:150,align:'center'}); doc.setFontSize(8); doc.text(verificationUrl,42,642,{maxWidth:500});
     doc.setDrawColor(199,216,201); doc.line(42,682,553,682); doc.setFontSize(9); doc.setTextColor(90,112,99); doc.text('This statement records a Canopy DEMO / SIMULATED retirement only. It does not transfer, retire, or verify real carbon credits and does not create registry-backed ownership.',42,704,{maxWidth:510});
     doc.save(`Canopy_Retirement_Statement_${row.statement_reference}.pdf`);
