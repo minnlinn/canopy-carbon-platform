@@ -52,7 +52,7 @@ Database migration files are included in [`supabase/migrations/`](supabase/migra
 3. Serve the folder using a local web server (recommended for service-worker/PWA testing). For example, if Python is installed, run `python -m http.server 8765` from the project folder.
 4. Open `http://localhost:8765/` in a browser.
 
-The frontend uses the Supabase project URL and **publishable** client key configured in `config.js`. Features requiring authentication and database access also require an appropriately configured Supabase project, database schema, RLS policies and, where applicable, Edge Function settings. **Opening the HTML files alone does not recreate the hosted backend or its data.**
+The frontend uses the Supabase project URL and **publishable** client key configured in `config.js`. The default configuration connects to Canopy's existing Supabase demonstration project. A separate Supabase environment is required for independent backend testing. Features requiring authentication and database access also require an appropriately configured Supabase project, database schema, RLS policies and, where applicable, Edge Function settings. **Opening the HTML files alone does not recreate the hosted backend or its data.**
 
 ### Supabase setup notes
 
