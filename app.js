@@ -11,6 +11,7 @@ const esc = value => String(value ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;',
 let toastTimer;
 const toast = (message, type='success') => { const el=$('#toast'); clearTimeout(toastTimer); el.textContent=message; el.className=`toast-${type} show`; toastTimer=setTimeout(()=>el.classList.remove('show'),4500); };
 const fail = error => { console.error(error); toast(error?.message || 'Something went wrong. Please try again.','error'); };
+const setAuthFeedback = (message='') => { const el=$('#authFeedback'); if(!el)return; el.textContent=message; el.hidden=!message; };
 
 function isStaff(){ return profile && ['admin','partner'].includes(profile.role); }
 function isAdmin(){ return profile?.role === 'admin'; }
@@ -47,6 +48,8 @@ async function loadData(){
 async function start(){
   bindPublicHelp();
   if(!configured){ setupScreen(); return; }
+  setAuthFeedback();
+  window.addEventListener('pageshow',()=>{ if(!profile)setAuthFeedback(); });
   bindAuth();
   const {data:{session}}=await db.auth.getSession();
   if(session) await enterApp();
@@ -55,17 +58,21 @@ async function start(){
 function bindAuth(){
   $$('[data-auth-tab]').forEach(button=>button.addEventListener('click',()=>{
     $$('[data-auth-tab]').forEach(b=>b.classList.toggle('active',b===button));
-    $('#loginForm').hidden=button.dataset.authTab!=='login'; $('#registerForm').hidden=button.dataset.authTab!=='register'; $('#partnerRegisterForm').hidden=button.dataset.authTab!=='partner'; $('#authFeedback').textContent='';
+    $('#loginForm').hidden=button.dataset.authTab!=='login'; $('#registerForm').hidden=button.dataset.authTab!=='register'; $('#partnerRegisterForm').hidden=button.dataset.authTab!=='partner'; setAuthFeedback();
   }));
   const referralCode=new URLSearchParams(location.search).get('ref');
   if(referralCode){ $('#registerForm [name="referral_code"]').value=referralCode; $('[data-auth-tab="register"]').click(); }
   $('#loginForm').addEventListener('submit', async event=>{
-    event.preventDefault(); const form=new FormData(event.currentTarget); $('#authFeedback').textContent='Signing in…';
-    const {error}=await db.auth.signInWithPassword({email:form.get('email'),password:form.get('password')});
-    if(error){ $('#authFeedback').textContent=error.message==='Failed to fetch' ? 'Cannot reach the configured Supabase Auth server. Check the Supabase project URL and network connection, then retry.' : error.message; return; } await enterApp();
+    event.preventDefault(); const form=new FormData(event.currentTarget), submitter=event.currentTarget.querySelector('[type="submit"]'); if(submitter.disabled)return;
+    submitter.disabled=true; setAuthFeedback('Signing in…');
+    try { const {error}=await db.auth.signInWithPassword({email:form.get('email'),password:form.get('password')});
+      if(error){ setAuthFeedback(error.message==='Failed to fetch' ? 'Cannot reach the configured Supabase Auth server. Check the Supabase project URL and network connection, then retry.' : error.message); return; }
+      setAuthFeedback(); await enterApp();
+    } catch(error) { setAuthFeedback(error?.message||'Could not sign in. Please try again.'); }
+    finally { submitter.disabled=false; }
   });
   const showRegistrationSuccess=emailConfirmationRequired=>{dialog(`<span class="eyebrow">ACCOUNT CREATED</span><h2>Account created successfully!</h2><p>Your account has been submitted for Admin verification. You can sign in once your account is approved.</p>${emailConfirmationRequired?'<p>Please check your email and confirm your address before signing in.</p>':''}<button class="btn primary" id="registrationSuccessOk" type="button">OK</button>`);$('#registrationSuccessOk').onclick=()=>$('#actionDialog').close();};
-  const submitRegistration=async(event,metadata)=>{event.preventDefault();const form=event.currentTarget;const submitter=form.querySelector('[type="submit"]');if(submitter?.disabled)return;const originalLabel=submitter.textContent;const feedback=$('#authFeedback');submitter.disabled=true;submitter.textContent='Creating…';feedback.textContent='';try{const values=new FormData(form);const {data,error}=await db.auth.signUp({email:values.get('email'),password:values.get('password'),options:{data:metadata(values)}});if(error)throw error;if(!data?.user||data.user.identities?.length===0)throw new Error('An account with this email may already exist. Sign in or reset the password instead.');form.reset();showRegistrationSuccess(!data.session);}catch(error){feedback.textContent=error?.message||'Could not create the account. Please try again.';}finally{submitter.disabled=false;submitter.textContent=originalLabel;}};
+  const submitRegistration=async(event,metadata)=>{event.preventDefault();const form=event.currentTarget;const submitter=form.querySelector('[type="submit"]');if(submitter?.disabled)return;const originalLabel=submitter.textContent;submitter.disabled=true;submitter.textContent='Creating…';setAuthFeedback();try{const values=new FormData(form);const {data,error}=await db.auth.signUp({email:values.get('email'),password:values.get('password'),options:{data:metadata(values)}});if(error)throw error;if(!data?.user||data.user.identities?.length===0)throw new Error('An account with this email may already exist. Sign in or reset the password instead.');form.reset();showRegistrationSuccess(!data.session);}catch(error){setAuthFeedback(error?.message||'Could not create the account. Please try again.');}finally{submitter.disabled=false;submitter.textContent=originalLabel;}};
   $('#registerForm').addEventListener('submit',event=>submitRegistration(event,values=>({canopy_account_type:'sme',company_name:values.get('company_name'),registration_number:values.get('registration_number'),contact_name:values.get('contact_name'),sector:values.get('sector'),referral_code:values.get('referral_code')||null})));
   $('#partnerRegisterForm').addEventListener('submit',event=>submitRegistration(event,values=>({canopy_account_type:'partner',company_name:values.get('company_name'),registration_number:values.get('registration_number'),organization_type:values.get('organization_type'),contact_name:values.get('contact_name'),phone:values.get('phone'),business_description:values.get('business_description')})));
 }
@@ -87,7 +94,7 @@ async function enterApp(){
     if(!accountStatus.error && accountStatus.data) profile.effective_status=accountStatus.data;
   }catch(error){
     profile=null; $('#appShell').hidden=true; $('#authShell').hidden=false;
-    $('#authFeedback').textContent=error.message; console.error(error); return;
+    setAuthFeedback(error.message); console.error(error); return;
   }
   if(profile.role==='sme'&&profile.effective_status==='verified'&&user.user_metadata?.referral_code){const {data,error}=await db.rpc('canopy_claim_partner_referral',{p_code:user.user_metadata.referral_code});if(error)console.warn('Partner referral could not be linked:',error.message);else if(data?.newly_linked)toast(`Referred by ${data.partner_name||'a verified Partner'}.`,'success');}
   currentView=roleHome(profile.role);
@@ -97,11 +104,11 @@ async function enterApp(){
   $('#navLabel').textContent=profile.role==='admin'?'ADMINISTRATOR WORKSPACE':profile.role==='partner'?'PARTNER WORKSPACE':'SME WORKSPACE';
   const displayedVerification=profile.effective_status || (profile.account_review_status==='rejected'?'rejected':profile.verification_status);
   $('#appNotice').innerHTML=displayedVerification==='verified' ? '<span class="notice-icon">✓</span><span><strong>Verified account.</strong> Transaction requests are recorded and await administrator review and settlement.</span>' : `<span class="notice-icon">i</span><span><strong>Account ${esc(statusLabel(displayedVerification))}.</strong> You can browse projects while Canopy reviews your account details.</span>`;
-  $('#signOut').onclick=async()=>{ await db.auth.signOut(); };
+  $('#signOut').onclick=async()=>{ setAuthFeedback(); await db.auth.signOut(); };
   await refresh();
   maybeShowWalkthrough();
 }
-function leaveApp(){ profile=null; $('#appShell').hidden=true; $('#authShell').hidden=false; }
+function leaveApp(){ profile=null; setAuthFeedback(); $('#appShell').hidden=true; $('#authShell').hidden=false; }
 async function refresh(){ try{ await loadData(); }catch(error){ fail(error); } renderNavigation(); render(); }
 function legacyRenderNavigation(){
   const base=profile?.role==='admin'?[['queue','Transaction approvals'],['smes','Account verification'],['projects','Projects'],['demo-projects','Demo project management'],['admin-subscriptions','Subscription management'],['revenue','Revenue dashboard'],['reports','Platform activity']]:profile?.role==='partner'?[['partner','Partner dashboard'],['partner-projects','Carbon projects'],['partner-reports','Client reports']]:profile?.role==='sme'?[['market','Marketplace'],['holdings','My holdings'],['requests','My requests'],['reports','Carbon & ESG reports'],['premium','Premium'],['partner-access','Partner access'],['learn','Learn'],['profile','Company profile']]:[];
