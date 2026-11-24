@@ -142,6 +142,12 @@
     const previous = { location: $('#demoProjectLocation')?.value || '', category: $('#demoProjectCategory')?.value || '', type: $('#demoProjectType')?.value || '' };
     const search = $('#demoProjectSearch')?.value || '';
     $('#demoProjectCatalog').innerHTML = `<section class="demo-project-market"><div class="page-heading"><div><span class="eyebrow">PUBLIC REGISTRY REFERENCES</span><h1>Malaysian carbon projects</h1><p>Demonstration listings — no real carbon credits sold. Public project facts are linked to their references; prices and inventory below are simulated and are not registry balances.</p></div></div>${demoBadge}<details class="demo-project-details"><summary>Pricing explained</summary><p>The demo reference price helps SMEs compare simulated project pricing. The ±15% range is a proposed Canopy platform rule, not a BCX requirement. A 1.5% transaction fee is shown at checkout. The sell-back quote is illustrative only; no sell-back offer or transaction is available.</p></details><form id="demoProjectFilters" class="demo-project-filters"><label>Search by name<input id="demoProjectSearch" type="search" value="${escapeHtml(search)}" placeholder="Search projects"></label><label>Location<select id="demoProjectLocation">${selectOptions(locations, previous.location)}</select></label><label>Category<select id="demoProjectCategory">${selectOptions(categories, previous.category)}</select></label><label>Project type<select id="demoProjectType">${selectOptions(types, previous.type)}</select></label></form><div class="demo-project-grid">${visibleProjects().map(card).join('') || '<p class="muted">No demonstration projects match these filters.</p>'}</div><div id="smeListings"></div><p id="demoProjectMessage" class="demo-project-message" role="status" aria-live="polite" hidden></p></section>`;
+    const imageNote = document.createElement('p');
+    imageNote.className = 'demo-project-image-note';
+    imageNote.textContent = 'Project images are for illustration purposes only.';
+    imageNote.style.cssText = 'margin:4px 0 0;color:#718278;font-size:.8rem;line-height:1.4';
+    document.querySelector('.demo-project-market .page-heading > div')?.append(imageNote);
+    document.querySelectorAll('.demo-project-image span').forEach((badge) => badge.remove());
     loadSmeListings();
     ['#demoProjectSearch', '#demoProjectLocation', '#demoProjectCategory', '#demoProjectType'].forEach(selector => $(selector).addEventListener(selector.includes('Search') ? 'input' : 'change', renderMarket));
     $$('.demo-purchase-form').forEach(form => {
