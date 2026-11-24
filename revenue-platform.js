@@ -342,10 +342,28 @@
   }
 
   async function partnerReportsView() {
-    const clients = await rpc('canopy_partner_clients');
-    const authorized = clients.filter(client => client.consent_granted);
-    const aggregate = '<p class="muted">Open an authorised SME record to view only the data that SME has explicitly permitted. Platform-wide anonymised insights are available on the Partner dashboard.</p>';
-    content(`<div class="page-heading"><div><span class="eyebrow">PARTNER REPORTING</span><h1>Authorized client reports</h1><p>Client data is available only while the SME’s explicit consent remains active. A referral alone never grants access.</p></div></div>${aggregate}${authorized.length ? `<div class="table-wrap"><table><thead><tr><th>SME</th><th>Verification</th><th>Permission</th><th>Report</th></tr></thead><tbody>${authorized.map(client => `<tr><td>${escapeHtml(client.company_name)}</td><td>${escapeHtml(client.verification_status)}</td><td>Active consent</td><td><button class="btn primary" data-authorized-report="${client.sme_id}">View authorized data</button></td></tr>`).join('')}</tbody></table></div>` : '<section class="revenue-locked"><h2>No active SME consent</h2><p>Ask a referred SME to open Partner access and authorize your organisation. Access is removed immediately when that SME revokes permission.</p></section>'}<section id="partnerReportDetail" class="revenue-section" hidden></section>`);
+    const [clients, referrals] = await Promise.all([
+      rpc('canopy_partner_clients'),
+      rpc('canopy_partner_referred_smes')
+    ]);
+    if (!Array.isArray(clients) || !Array.isArray(referrals)) {
+      throw new Error('Partner access data returned an unexpected response. Please refresh and try again.');
+    }
+    const authorizedBySme = new Map(clients.filter(client => client?.consent_granted && client?.sme_id).map(client => [client.sme_id, client]));
+    const referredIds = new Set(referrals.map(referral => referral.sme_id).filter(Boolean));
+    const accessRows = [
+      ...referrals.map(referral => ({ referral, client: referral.sme_id ? authorizedBySme.get(referral.sme_id) : null })),
+      ...clients.filter(client => client?.consent_granted && client?.sme_id && !referredIds.has(client.sme_id)).map(client => ({ referral: null, client }))
+    ];
+    const aggregate = '<p class="muted">A referral never grants data access. Business Profile sharing can identify an SME; Full Carbon Data Access is required before carbon holdings, transactions, retirements, or reports can be opened.</p>';
+    const accessTable = accessRows.length ? `<div class="table-wrap"><table><thead><tr><th>SME</th><th>Verification</th><th>Permission</th><th>Report</th></tr></thead><tbody>${accessRows.map(({ referral, client }) => {
+      const profileShared = Boolean(referral?.profile_shared);
+      const name = client?.company_name || (profileShared ? referral.company_name : 'Company profile not shared');
+      const verification = client?.verification_status || referral?.verification_status || 'Not available';
+      const permission = client ? 'Full carbon data access' : profileShared ? 'Business Profile sharing' : 'No business profile sharing';
+      return `<tr><td>${escapeHtml(name || 'Company profile not shared')}</td><td>${escapeHtml(verification)}</td><td>${permission}</td><td>${client ? `<button class="btn primary" data-authorized-report="${client.sme_id}">View authorized data</button>` : '<span class="muted">Full data access not granted</span>'}</td></tr>`;
+    }).join('')}</tbody></table></div>` : '<section class="revenue-locked"><h2>No referred SMEs yet</h2><p>When a referred SME grants Business Profile or Full Carbon Data Access, its permitted information will appear here. Revoking consent removes detailed access immediately.</p></section>';
+    content(`<div class="page-heading"><div><span class="eyebrow">PARTNER REPORTING</span><h1>Authorized client reports</h1><p>Client data is available only while the SME’s explicit consent remains active. A referral alone never grants access.</p></div></div>${aggregate}${accessTable}<section id="partnerReportDetail" class="revenue-section" hidden></section>`);
     document.querySelectorAll('[data-authorized-report]').forEach(button => button.addEventListener('click', async () => {
       button.disabled = true;
       try {
