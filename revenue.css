@@ -27,3 +27,5 @@
 @media(min-width:721px){.partner-access-card{align-items:stretch}.consent-grid{height:100%;grid-template-rows:repeat(3,minmax(0,1fr))}}
 /* Anchor each Partner Access consent action consistently beneath its content. */
 .consent-grid section{display:flex;flex-direction:column}.consent-grid section>small.muted{order:1;margin:0 0 10px}.consent-grid .btn{order:2;align-self:flex-end;margin-top:auto}
+/* Decorative local artwork for the three Partner Access consent cards. */
+.consent-banner{display:block;order:1;width:100%;height:clamp(88px,9vw,118px);margin:2px 0 16px;object-fit:cover;border:1px solid #dce9db;border-radius:12px;background:#eef6ec}.consent-grid section>p{order:0}.consent-grid section>.consent-banner+.muted{order:1;margin-top:-5px}@media(max-width:720px){.consent-banner{height:clamp(82px,24vw,118px);margin-bottom:14px}}
